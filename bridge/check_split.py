@@ -1,0 +1,82 @@
+"""Load the split AP-10K checkpoint and run one dummy image on CPU.
+
+Keep this file with bridge_paths.py in bridge/.
+Run from the project root:
+
+    python bridge/check_split.py
+
+The config is under vitpose/configs/ and the checkpoint is
+bridge/checkpoints/split/ap10k.pth.
+An editable mmpose installation is optional: bridge_paths.py exposes the local
+checkout. Existing third-party dependencies still need to be installed.
+No dataset, training, or checkpoint modification is involved in this check.
+"""
+
+import argparse
+
+if __package__:
+    from .bridge_paths import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, resolve_input_file
+else:
+    from bridge_paths import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, resolve_input_file
+
+
+def load_pose_model(cfg, checkpoint_path):
+    """Build the configured pose model and require an exact weight match."""
+    import torch
+    from mmpose.models import build_posenet
+
+    model = build_posenet(cfg.model).cpu()
+    checkpoint = torch.load(str(checkpoint_path), map_location="cpu")
+    if checkpoint.get("stage") == "NuWa-SKP":
+        raise ValueError(
+            "This is a NuWa mask-only file. Use the original split ap10k.pth "
+            "checkpoint for check_split.py and the unpruned baseline evaluator."
+        )
+    model.load_state_dict(checkpoint.get("state_dict", checkpoint), strict=True)
+    model.eval()
+    return model
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", default=DEFAULT_CONFIG)
+    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
+    args = parser.parse_args()
+
+    try:
+        config_path = resolve_input_file(args.config, "--config")
+        checkpoint_path = resolve_input_file(args.checkpoint, "--checkpoint")
+    except FileNotFoundError as error:
+        parser.error(str(error))
+
+    import torch
+    from mmcv import Config
+
+    cfg = Config.fromfile(str(config_path))
+    model = load_pose_model(cfg, checkpoint_path)
+    print("Checkpoint loaded successfully", flush=True)
+
+    width, height = map(int, cfg.data_cfg.image_size)
+    heatmap_width, heatmap_height = map(int, cfg.data_cfg.heatmap_size)
+    expected = (1, int(cfg.data_cfg.num_joints), heatmap_height, heatmap_width)
+    torch.manual_seed(0)
+    with torch.no_grad():
+        image = torch.randn(1, 3, height, width)
+        features = model.backbone(image)
+        if getattr(model, "with_neck", False):
+            features = model.neck(features)
+        heatmaps = model.keypoint_head(features)
+
+    if not torch.is_tensor(heatmaps) or tuple(heatmaps.shape) != expected:
+        raise RuntimeError("Expected heatmaps with shape {}, got {}".format(
+            expected, getattr(heatmaps, "shape", type(heatmaps).__name__)))
+    if not torch.isfinite(heatmaps).all().item():
+        raise RuntimeError("Heatmaps contain NaN or infinity")
+
+    print("Heatmap shape:", tuple(heatmaps.shape))
+    print("CPU test passed")
+
+
+if __name__ == "__main__":
+    main()
