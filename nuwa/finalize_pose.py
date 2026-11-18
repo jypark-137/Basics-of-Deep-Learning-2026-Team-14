@@ -53,7 +53,7 @@ def get_args_parser():
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--out-dir", help="Default: a new nuwa/work_dirs/final_compare run")
+    parser.add_argument("--out-dir", help="Default: a new outputs/final_compare run")
     parser.add_argument("--resume", action="store_true", help="Resume matching results in --out-dir")
     parser.add_argument("--smoke-test", action="store_true", help="Skip AP; one warmup and two timings")
     return parser

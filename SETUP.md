@@ -169,17 +169,19 @@ project-root/
     mmcv_custom/
     configs/
   bridge/
-    checkpoints/
-      split/
-        ap10k.pth
-    data/
-      ap-10k/
-        annotations/
-          ap10k-train-split1.json
-          ap10k-val-split1.json
-          ap10k-test-split1.json   # needed only for test-set evaluation
-        data/
-          <images at the paths in the annotations' file_name fields>
+  checkpoints/
+    vitpose-plus-small.pth         # source checkpoint, if conversion is needed
+    split/
+      ap10k.pth
+  data/
+    ap-10k/
+      annotations/
+        ap10k-train-split1.json
+        ap10k-val-split1.json
+        ap10k-test-split1.json     # needed only for test-set evaluation
+      data/
+        <images at the paths in the annotations' file_name fields>
+  outputs/                       # generated models, masks, logs and results
 ```
 
 Obtain AP-10K using the
@@ -201,9 +203,25 @@ the same ordinary architecture and AP-10K head. A raw ViTPose++ multi-expert
 checkpoint or a ViTPose-B checkpoint requires the appropriate conversion or
 config before it can be loaded by this default setup.
 
+To split the supplied ViTPose++ source checkpoint, run:
+
+```console
+python vitpose/tools/model_split.py
+```
+
+The splitter reads `checkpoints/vitpose-plus-small.pth` and writes the task
+checkpoints, including `ap10k.pth`, into `checkpoints/split/`. It creates the
+output directory when needed. Use `--source` and `--target` to select other
+paths; relative paths are resolved from the project root.
+
 Relative config, checkpoint, annotation, data and output paths are resolved
 from the project root. Absolute paths are also accepted. Outputs default to
-`nuwa/work_dirs/`.
+`outputs/`.
+
+This output folder collects evaluation predictions/metrics, training logs,
+learned masks, generated model checkpoints, calibration scores, and profiling
+and comparison reports. Pretrained source/split weights stay in `checkpoints/`;
+dataset files and prepared species annotations stay in `data/`.
 
 ## Verify the installation
 
@@ -245,18 +263,18 @@ python main.py prepare --species dog
 ```
 
 Species preparation writes filtered annotation files under
-`bridge/data/ap-10k/annotations/species/dog/` and reuses the original images.
+`data/ap-10k/annotations/species/dog/` and reuses the original images.
 
 ### CPU smoke run
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --device cpu --smoke-test --out-dir nuwa/work_dirs/dog_cpu_smoke
+python main.py derive --species dog --pruning-rate 0.4 --device cpu --smoke-test --out-dir outputs/dog_cpu_smoke
 ```
 
 ### GPU smoke run
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --device cuda:0 --smoke-test --out-dir nuwa/work_dirs/dog_gpu_smoke
+python main.py derive --species dog --pruning-rate 0.4 --device cuda:0 --smoke-test --out-dir outputs/dog_gpu_smoke
 ```
 
 Each smoke run performs ten mask updates, anchor export, OFP using two
@@ -268,7 +286,7 @@ After a successful smoke run, start a full run in another directory. This
 command uses CUDA automatically when available:
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --out-dir nuwa/work_dirs/dog_full
+python main.py derive --species dog --pruning-rate 0.4 --out-dir outputs/dog_full
 ```
 
 Add `--device cpu` for a full CPU run. Full runs default to 10,000 mask
@@ -278,7 +296,7 @@ fine-tuning is enabled with `--retrain --finetune-steps 1000`.
 To evaluate a generated model:
 
 ```console
-python main.py evaluate --checkpoint nuwa/work_dirs/dog_full/ofp/edge.pth
+python main.py evaluate --checkpoint outputs/dog_full/ofp/edge.pth
 ```
 
 Checkpoints can move between CPU and GPU. Start a new comparison output
@@ -295,7 +313,7 @@ stages, model reuse, profiling, ablation, and resume options.
 | `mmcv._ext`, DLL, or undefined-symbol error | Check the PyTorch/MMCV binary pairing and whether both MMCV distributions were installed. Recreate the separate environment with one matching `mmcv-full` wheel. |
 | NumPy binary/ABI error from `xtcocotools` | Check that NumPy is 1.23.5 and xtcocotools is 1.14.3 in the selected environment; reinstall their matching wheels there. |
 | `libGL.so.1` or `libgthread-2.0.so.0` missing on Linux | Install the OpenCV system libraries; on Debian/Ubuntu these are `libgl1` and `libglib2.0-0`. A headless alternative is to replace `opencv-python` with `opencv-python-headless==4.8.1.78`. Keep one OpenCV distribution. |
-| Dataset/subset not found | Check the `bridge/data/ap-10k/annotations/` and `data/` layout, or supply `--data-root` consistently to preparation and model commands. Run species preparation before derivation. |
+| Dataset/subset not found | Check the `data/ap-10k/annotations/` and `data/` layout, or supply `--data-root` consistently to preparation and model commands. Run species preparation before derivation. |
 | Missing/unexpected checkpoint keys or size mismatch | Check that the ordinary ViTPose-S config and split AP-10K checkpoint match. SKP mask-only files must first be exported as `anchor.pth`. |
 | CUDA out of memory | Keep training batch size at 1 on the MIG allocation, check other GPU processes, and use the small config. The project also supports explicit CPU execution. |
 | Output directory already exists | Choose another `--out-dir`, or use the documented `--resume` option with matching settings and completed stages. |

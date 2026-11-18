@@ -6,7 +6,7 @@ project root:
     python bridge/nuwa_vitpose_bridge.py
 
 The defaults use the same AP-10K config and split checkpoint as check_split.py.
-Configs use vitpose/configs/. The checkpoint is bridge/checkpoints/split/ap10k.pth.
+Configs use vitpose/configs/. The checkpoint is checkpoints/split/ap10k.pth.
 Override them with --config and --checkpoint if needed. No dataset is needed.
 Keep your existing third-party dependencies installed.
 

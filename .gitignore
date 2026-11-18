@@ -5,8 +5,8 @@ venv/
 .env
 .vscode/
 
-bridge/data/
+/data/
 vitpose/data/
-checkpoints/
-work_dirs/
+/checkpoints/
+/outputs/
 *.pth

@@ -153,7 +153,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT, type=Path,
-                        help="AP-10K folder; default: bridge/data/ap-10k")
+                        help="AP-10K folder; default: data/ap-10k")
     parser.add_argument("--split", type=int, choices=(1, 2, 3), default=1,
                         help="Official split number; default: 1")
     action = parser.add_mutually_exclusive_group()

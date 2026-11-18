@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--out-dir", help="Default: a new nuwa/work_dirs/ablation_study run")
+    parser.add_argument("--out-dir", help="Default: a new outputs/ablation_study run")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--smoke-test", action="store_true", help="Two training crops per case; no AP")
     return parser

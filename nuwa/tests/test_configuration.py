@@ -21,8 +21,8 @@ class ConfigurationChecks(unittest.TestCase):
             try:
                 os.chdir(directory)
                 self.assertEqual(resolve_input_file("main.py", "entry point"), PROJECT_ROOT / "main.py")
-                self.assertEqual(resolve_data_root("bridge/data/ap-10k"), Path(DEFAULT_DATA_ROOT))
-                self.assertEqual(resolve_project_path("nuwa/work_dirs"), DEFAULT_OUTPUT_ROOT)
+                self.assertEqual(resolve_data_root("data/ap-10k"), Path(DEFAULT_DATA_ROOT))
+                self.assertEqual(resolve_project_path("outputs"), DEFAULT_OUTPUT_ROOT)
                 from bridge import bridge_paths
                 self.assertEqual(Path(bridge_paths.DEFAULT_DATA_ROOT), Path(DEFAULT_DATA_ROOT))
                 self.assertEqual(bridge_paths.resolve_input_file("main.py", "entry point"), PROJECT_ROOT / "main.py")

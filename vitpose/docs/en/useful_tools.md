@@ -125,7 +125,7 @@ python tools/publish_model.py ${INPUT_FILENAME} ${OUTPUT_FILENAME}
 E.g.,
 
 ```shell
-python tools/publish_model.py work_dirs/hrnet_w32_coco_256x192/latest.pth hrnet_w32_coco_256x192
+python tools/publish_model.py outputs/hrnet_w32_coco_256x192/latest.pth hrnet_w32_coco_256x192
 ```
 
 The final output filename will be `hrnet_w32_coco_256x192-{hash id}_{time_stamp}.pth`.

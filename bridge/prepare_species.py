@@ -7,7 +7,7 @@ Run from the project root:
     python bridge/prepare_species.py
 
 The default species is dog. Use --species to select another species.
-The default data root is bridge/data/ap-10k.
+The default data root is data/ap-10k.
 
 The data root must contain annotations/ and data/. The script keeps the
 official train/validation split, original IDs, keypoints, and category metadata.
@@ -176,7 +176,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT, type=Path,
-                        help="AP-10K folder; default: bridge/data/ap10k")
+                        help="AP-10K folder; default: data/ap-10k")
     parser.add_argument("--split", type=int, choices=(1, 2, 3), default=1,
                         help="Official split number; default: 1")
     action = parser.add_mutually_exclusive_group()

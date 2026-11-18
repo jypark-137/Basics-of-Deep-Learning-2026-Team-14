@@ -1,23 +1,43 @@
+"""Split a ViTPose++ checkpoint into root checkpoints/split/.
+
+Run from the project root: python vitpose/tools/model_split.py
+--source and --target accept absolute paths or paths relative to that root.
+"""
+
 import torch
 import os
 import argparse
 import copy
+from pathlib import Path
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str)
-    parser.add_argument('--target', type=str, default=None)
-    args = parser.parse_args()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--source', type=Path,
+                        default=Path('checkpoints/vitpose-plus-small.pth'),
+                        help='Input ViTPose++ checkpoint')
+    parser.add_argument('--target', type=Path, default=Path('checkpoints/split'),
+                        help='Output directory for task checkpoints')
+    args = parser.parse_args(argv)
+    args.source = (PROJECT_ROOT / args.source.expanduser()).resolve()
+    args.target = (PROJECT_ROOT / args.target.expanduser()).resolve()
     return args
 
-def main():
 
-    args = parse_args()
+def main(argv=None):
 
-    if args.target is None:
-        args.target = '/'.join(args.source.split('/')[:-1])
+    args = parse_args(argv)
+
+    if not args.source.is_file():
+        raise FileNotFoundError(f'Input checkpoint not found: {args.source}')
 
     ckpt = torch.load(args.source, map_location='cpu')
+    args.target.mkdir(parents=True, exist_ok=True)
+    print('Source:', args.source)
+    print('Output directory:', args.target)
     
     experts = dict()
 

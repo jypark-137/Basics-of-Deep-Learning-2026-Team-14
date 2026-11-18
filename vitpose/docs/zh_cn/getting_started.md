@@ -203,7 +203,7 @@ export CUDA_VISIBLE_DEVICES=-1
 这里提供一个使用 8 块 GPU 加载 ResNet50 模型权重文件的例子。
 
 ```shell
-./tools/dist_train.sh configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/res50_coco_256x192.py 8 --resume_from work_dirs/res50_coco_256x192/latest.pth
+./tools/dist_train.sh configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/res50_coco_256x192.py 8 --resume_from outputs/res50_coco_256x192/latest.pth
 ```
 
 ### 使用多台机器训练
@@ -218,7 +218,7 @@ export CUDA_VISIBLE_DEVICES=-1
 使用 `GPUS_PER_NODE=8` 参数来指定一个有 8 块 GPUS 的 slurm 集群节点，使用 `CPUS_PER_TASK=2` 来指定每个任务拥有2块cpu。
 
 ```shell
-GPUS=16 GPUS_PER_NODE=8 CPUS_PER_TASK=2 ./tools/slurm_train.sh Test res50 configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/res50_coco_256x192.py work_dirs/res50_coco_256x192
+GPUS=16 GPUS_PER_NODE=8 CPUS_PER_TASK=2 ./tools/slurm_train.sh Test res50 configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/res50_coco_256x192.py outputs/res50_coco_256x192
 ```
 
 用户可以查看 [slurm_train.sh](/tools/slurm_train.sh) 文件来检查完整的参数和环境变量。

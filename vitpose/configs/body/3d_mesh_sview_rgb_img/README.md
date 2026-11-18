@@ -116,5 +116,5 @@ mmpose
 Here is the code of using 8 GPUs to train HMR net:
 
 ```shell
-./tools/dist_train.sh configs/mesh/hmr/hmr_resnet_50.py 8 --work-dir work_dirs/hmr --no-validate
+./tools/dist_train.sh configs/mesh/hmr/hmr_resnet_50.py 8 --work-dir outputs/hmr --no-validate
 ```

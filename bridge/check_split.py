@@ -6,7 +6,7 @@ Run from the project root:
     python bridge/check_split.py
 
 The config is under vitpose/configs/ and the checkpoint is
-bridge/checkpoints/split/ap10k.pth.
+checkpoints/split/ap10k.pth.
 Existing third-party dependencies still need to be installed.
 No dataset, training, or checkpoint modification is involved in this check.
 """

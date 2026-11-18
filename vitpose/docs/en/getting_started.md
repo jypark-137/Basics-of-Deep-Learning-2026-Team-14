@@ -204,7 +204,7 @@ Difference between `resume-from` and `load-from`:
 Here is an example of using 8 GPUs to load ResNet50 checkpoint.
 
 ```shell
-./tools/dist_train.sh configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/res50_coco_256x192.py 8 --resume_from work_dirs/res50_coco_256x192/latest.pth
+./tools/dist_train.sh configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/res50_coco_256x192.py 8 --resume_from outputs/res50_coco_256x192/latest.pth
 ```
 
 ### Train with multiple machines
@@ -220,7 +220,7 @@ Here is an example of using 16 GPUs to train ResNet50 on the dev partition in a 
 Assume that `Test` is a valid ${PARTITION} name.)
 
 ```shell
-GPUS=16 GPUS_PER_NODE=8 CPUS_PER_TASK=2 ./tools/slurm_train.sh Test res50 configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/res50_coco_256x192.py work_dirs/res50_coco_256x192
+GPUS=16 GPUS_PER_NODE=8 CPUS_PER_TASK=2 ./tools/slurm_train.sh Test res50 configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/res50_coco_256x192.py outputs/res50_coco_256x192
 ```
 
 You can check [slurm_train.sh](/tools/slurm_train.sh) for full arguments and environment variables.

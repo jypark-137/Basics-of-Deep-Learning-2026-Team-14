@@ -69,7 +69,7 @@ def check_reports():
     assert ABLATIONS["without_compensation"]["reconstruction"] is False
     must_fail(ablation_cases, [0.4, 0.4], ["full_nuwa"])
     must_fail(ablation_cases, [1.0], ["full_nuwa"])
-    assert parse_edges(["full=bridge/work_dirs/run/edge.pth"])[0]["label"] == "full"
+    assert parse_edges(["full=outputs/run/edge.pth"])[0]["label"] == "full"
     must_fail(parse_edges, ["A=one.pth", "a=two.pth"])
     must_fail(parse_edges, ["baseline=one.pth"])
     must_fail(parse_edges, ["../bad=one.pth"])

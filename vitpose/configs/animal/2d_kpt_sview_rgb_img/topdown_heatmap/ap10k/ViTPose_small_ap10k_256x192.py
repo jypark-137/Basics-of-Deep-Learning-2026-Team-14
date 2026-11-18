@@ -127,8 +127,8 @@ val_pipeline = [
 
 test_pipeline = val_pipeline
 
-# Relative to the project root containing bridge/ and vitpose/.
-data_root = 'bridge/data/ap-10k'
+# Relative to the project root containing data/ and vitpose/.
+data_root = 'data/ap-10k'
 data = dict(
     samples_per_gpu=64,
     workers_per_gpu=4,

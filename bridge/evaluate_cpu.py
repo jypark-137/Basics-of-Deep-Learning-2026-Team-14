@@ -16,12 +16,12 @@ custom annotation file; it must contain only the requested species unless
 
 CUDA is selected when available; --device cpu forces CPU execution.
 The legacy filename is retained for existing commands.
-The default data root is bridge/data/ap-10k, containing annotations/ and data/.
-Configs use vitpose/configs/. The checkpoint is bridge/checkpoints/split/ap10k.pth.
+The default data root is data/ap-10k, containing annotations/ and data/.
+Configs use vitpose/configs/. The checkpoint is checkpoints/split/ap10k.pth.
 
 The model configuration's preprocessing, flip testing, bounding-box settings
 and official dataset.evaluate(..., metric='mAP') scoring are preserved.
-Predictions and metrics are saved under bridge/work_dirs/<species>_baseline_<device>/.
+Predictions and metrics are saved under outputs/<species>_baseline_<device>/.
 This evaluates an ordinary full-weight checkpoint; SKP mask-only files are
 not standalone models and are not accepted as --checkpoint.
 """
@@ -112,7 +112,7 @@ def main():
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT,
-                        help="AP-10K folder; default: bridge/data/ap-10k")
+                        help="AP-10K folder; default: data/ap-10k")
     parser.add_argument("--species", default=DEFAULT_SPECIES,
                         help="One species, or all; default: dog")
     parser.add_argument("--split", choices=("val", "test"), default="val")

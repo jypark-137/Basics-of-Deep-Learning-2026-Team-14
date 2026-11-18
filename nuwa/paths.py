@@ -1,4 +1,4 @@
-"""Shared project paths; the dataset and pretrained weights remain in bridge/."""
+"""Shared paths for root-level data, checkpoints and experiment outputs."""
 
 
 from pathlib import Path
@@ -7,13 +7,12 @@ import sys
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 VITPOSE_ROOT = PROJECT_ROOT / "vitpose"
-BRIDGE_ROOT = PROJECT_ROOT / "bridge"
 DEFAULT_SPECIES = "dog"
 DEFAULT_CONFIG = str(VITPOSE_ROOT / "configs/animal/2d_kpt_sview_rgb_img/"
                      "topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py")
-DEFAULT_CHECKPOINT = str(BRIDGE_ROOT / "checkpoints/split/ap10k.pth")
-DEFAULT_DATA_ROOT = str(BRIDGE_ROOT / "data/ap-10k")
-DEFAULT_OUTPUT_ROOT = PACKAGE_ROOT / "work_dirs"
+DEFAULT_CHECKPOINT = str(PROJECT_ROOT / "checkpoints/split/ap10k.pth")
+DEFAULT_DATA_ROOT = str(PROJECT_ROOT / "data/ap-10k")
+DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "outputs"
 
 if (VITPOSE_ROOT / "mmpose").is_dir():
     if str(VITPOSE_ROOT) not in sys.path:

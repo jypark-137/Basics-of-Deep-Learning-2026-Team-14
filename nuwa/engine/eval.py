@@ -80,7 +80,7 @@ def get_args_parser():
     parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3))
     parser.add_argument("--ann-file", help="Optional prefiltered annotation file")
-    parser.add_argument("--out-dir", help="Default: nuwa/work_dirs/nuwa_eval/<checkpoint>/<species>/<split>")
+    parser.add_argument("--out-dir", help="Default: outputs/nuwa_eval/<checkpoint>/<species>/<split>")
     add_device_argument(parser)
     parser.add_argument("--threads", type=int, default=1, help="CPU threads; default: 1")
     return parser

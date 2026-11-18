@@ -3,14 +3,17 @@
 This is an independent project package arranged like the original NuWa. It
 uses the ordinary ViTPose backbone, weighted pose loss, and official AP-10K
 evaluator. Keep the existing `vitpose/` checkout and configured `idl_proj`
-environment. The dataset and pretrained checkpoint stay in their existing
-locations; no weights or images are copied into this folder.
+environment. Dataset files live in root `data/`, pretrained weights in root
+`checkpoints/`, and experiment outputs in root `outputs/`.
 
 ## Layout
 
 ```text
 main.py                      common CLI; complete derivation is the default
 device_utils.py              shared CPU/CUDA selection
+checkpoints/                 source and split pretrained weights
+data/                        AP-10K data and annotations
+outputs/                   generated models, logs and reports
 nuwa/
   __main__.py                python -m nuwa entry point
   paths.py                   shared paths and local ViTPose discovery
@@ -63,14 +66,20 @@ python main.py prepare --species dog
 ```
 
 Defaults are `vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py`,
-`bridge/checkpoints/split/ap10k.pth`, and `bridge/data/ap-10k`. Outputs default
-to `nuwa/work_dirs/`. Override paths with `--config`, `--checkpoint`,
+`checkpoints/split/ap10k.pth`, and `data/ap-10k`. Outputs default
+to `outputs/`. Override paths with `--config`, `--checkpoint`,
 `--data-root`, and `--out-dir`. Use `python main.py ...` or
 `python -m nuwa ...`. Modules use ordinary package imports; run a specific
 module with `python -m nuwa.engine.eval ...` when needed.
 
 Relative configuration, checkpoint, annotation, data and output paths are
 resolved from the project root, even when a command is started elsewhere.
+
+`outputs/` holds artifacts from every experiment stage: evaluation predictions
+and metrics; learned SKP masks; anchor, pruned and fine-tuned model weights;
+training logs; calibration scores; profiling and comparison reports; and run
+configs/manifests. Source pretrained weights live in `checkpoints/`, and
+dataset images and species annotations live in `data/`.
 
 ## CPU and GPU execution
 
@@ -110,13 +119,13 @@ A complete connection check performs ten mask updates, prunes using two
 training crops, reloads the checkpoints, and benchmarks synthetic heatmaps:
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --smoke-test --out-dir nuwa/work_dirs/dog_smoke
+python main.py derive --species dog --pruning-rate 0.4 --smoke-test --out-dir outputs/dog_smoke
 ```
 
 Run the complete experiment without `--smoke-test` in a new folder:
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --out-dir nuwa/work_dirs/dog_full
+python main.py derive --species dog --pruning-rate 0.4 --out-dir outputs/dog_full
 ```
 
 The default derivation learns masks for 10,000 updates, exports the anchor,
