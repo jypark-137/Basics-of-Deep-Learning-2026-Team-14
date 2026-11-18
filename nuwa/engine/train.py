@@ -27,6 +27,7 @@ from ..utils.io import atomic_json
 from ..utils.utils import set_seed
 from .eval import evaluate
 from .utils import get_delta_acc, log_metrics, save_model
+from ..species import add_species_argument, normalize_species, species_slug
 
 
 def train(args, model, train_loader, test_loader, model_name=None, early_stop=True, best=False):
@@ -124,7 +125,7 @@ def get_args_parser():
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--species")
+    add_species_argument(parser)
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3))
     parser.add_argument("--out-dir")
     add_device_argument(parser)
@@ -151,15 +152,15 @@ def run(args, parser=None):
     cfg = pose_config(args.config)
     checkpoint = resolve_input_file(args.checkpoint, "--checkpoint")
     model, info = load_pose_checkpoint(cfg, checkpoint, resolve_device(args.device))
-    args.species = args.species or info.get("species") or "dog"
+    args.species = normalize_species(args.species or info.get("species") or "dog")
     args.split_id = args.split_id or info.get("split", 1)
-    if info.get("species") and args.species.casefold() != info["species"].casefold():
+    if info.get("species") and args.species != normalize_species(info["species"]):
         parser.error("species must match the source checkpoint")
     if info.get("split") and args.split_id != info["split"]:
         parser.error("split-id must match the source checkpoint")
     args._model_info = {key: value for key, value in info.items() if key != "state_dict"}
     directory = resolve_project_path(args.out_dir) if args.out_dir else (
-        DEFAULT_OUTPUT_ROOT / "finetune" / args.species
+        DEFAULT_OUTPUT_ROOT / "finetune" / species_slug(args.species)
         / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
     )
     if directory.exists():

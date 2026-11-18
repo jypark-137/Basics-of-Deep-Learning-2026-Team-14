@@ -13,6 +13,7 @@ from ..model.utils import pose_config
 from ..model.vit import AttentionPruned, attention_specs, hidden_sizes
 from ..paths import DEFAULT_OUTPUT_ROOT, resolve_project_path
 from ..utils.io import atomic_torch_save
+from ..species import normalize_species
 
 
 def better_acc(value, best):
@@ -59,7 +60,7 @@ def save_model(args, model, model_name=None, *, step=None, val_ap=None):
     info.update({
         "format_version": 1, "portable_format_version": 1, "stage": stage,
         "geometry": geometry(cfg), "finetuned": True,
-        "species": getattr(args, "species", None) or info.get("species"),
+        "species": normalize_species(getattr(args, "species", None) or info.get("species") or "dog"),
         "split": getattr(args, "split_id", None) or info.get("split", 1),
         "finetune_step": step, "finetune_val_ap": val_ap,
         "smoke_test": bool(getattr(args, "smoke_test", False)),

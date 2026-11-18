@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import re
 from .io import atomic_json, atomic_text
+from ..species import normalize_species
 
 ABLATIONS = {
     "activation": {"skp": False, "attention_svd": False, "reconstruction": False},
@@ -70,7 +71,7 @@ def validate_provenance(info, role, species, split_id, base_ids, anchor_ids):
         raise ValueError("Wrong checkpoint type for {}: {}".format(role, stage))
     if role == "baseline":
         return
-    if str(info.get("species", "")).strip().casefold() != species.strip().casefold():
+    if normalize_species(info.get("species")) != normalize_species(species):
         raise ValueError("Checkpoint species differs from the comparison species")
     if info.get("split") != split_id:
         raise ValueError("Checkpoint training split differs from the comparison split ID")

@@ -4,6 +4,7 @@ Keep this file, check_split.py and bridge_paths.py in bridge/.
 Run from the project root:
 
     python bridge/evaluate_cpu.py
+    python bridge/evaluate_cpu.py --species dog cat
     python bridge/evaluate_cpu.py --species all --split test
     python bridge/evaluate_cpu.py --device cpu
 
@@ -11,7 +12,7 @@ The default is DOG VALIDATION, using the prepared species annotation subset.
 Use --species all for the original complete validation/test annotations.
 Species-specific test annotations must be provided separately:
 prepare_species.py creates train/validation subsets. --ann-file can select a
-custom annotation file; it must contain only the requested species unless
+custom annotation file; it must contain only the selected species unless
 --species all is used.
 
 CUDA is selected when available; --device cpu forces CPU execution.
@@ -30,7 +31,6 @@ import argparse
 import json
 import math
 import os
-import re
 
 if __package__:
     from .bridge_paths import (
@@ -44,66 +44,8 @@ else:
         resolve_data_root, resolve_device, resolve_input_file, resolve_project_path,
     )
     from check_split import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, load_pose_model
-
-
-def evaluation_paths(data_root, species, split, split_id, ann_file=None):
-    """Validate the selected dataset without loading images."""
-    data_root = resolve_data_root(data_root)
-    species = species.strip()
-    if not species:
-        raise ValueError("Species cannot be empty; use dog or all")
-    all_species = species.casefold() == "all"
-    slug = "all" if all_species else re.sub(r"[^a-z0-9]+", "_", species.casefold()).strip("_")
-    if not slug:
-        raise ValueError("Use a species name from prepare_species.py --list")
-
-    filename = "ap10k-{}-split{}.json".format(split, split_id)
-    if ann_file is not None:
-        annotation_path = resolve_input_file(ann_file, "--ann-file")
-    elif all_species:
-        annotation_path = data_root / "annotations" / filename
-    else:
-        annotation_path = data_root / "annotations" / "species" / slug / filename
-    if not annotation_path.is_file():
-        if all_species or ann_file is not None:
-            raise ValueError("Annotation file not found: {}".format(annotation_path))
-        if split == "test":
-            raise ValueError(
-                "Species test annotations not found: {}. prepare_species.py creates "
-                "only train/val subsets. To reproduce the complete test benchmark, "
-                "use --species all --split test.".format(annotation_path)
-            )
-        raise ValueError(
-            "Species subset not found: {}. Run bridge/prepare_species.py "
-            "with this --data-root and --species first.".format(annotation_path)
-        )
-
-    image_root = data_root / "data"
-    if not image_root.is_dir():
-        raise ValueError("Image directory not found: {}".format(image_root))
-    with annotation_path.open("r", encoding="utf-8-sig") as handle:
-        annotations = json.load(handle)
-    for key in ("images", "annotations", "categories"):
-        if not isinstance(annotations.get(key), list) or not annotations[key]:
-            raise ValueError("{} needs a nonempty {} list".format(annotation_path, key))
-    if not all_species:
-        matches = [category["id"] for category in annotations["categories"]
-                   if category["name"].strip().casefold() == species.casefold()]
-        if len(matches) != 1:
-            raise ValueError("Species {!r} is not unique in the annotations".format(species))
-        if any(annotation["category_id"] != matches[0]
-               for annotation in annotations["annotations"]):
-            raise ValueError(
-                "The selected annotations include other species. Use a filtered "
-                "subset for {!r}, or --species all for all species.".format(species)
-            )
-    image_ids = {image["id"] for image in annotations["images"]}
-    if any(annotation["image_id"] not in image_ids for annotation in annotations["annotations"]):
-        raise ValueError("Some annotations refer to missing image records")
-    for image in annotations["images"]:
-        if not (image_root / image["file_name"]).is_file():
-            raise ValueError("Image not found: {}".format(image_root / image["file_name"]))
-    return annotation_path, image_root, slug
+from nuwa.dataset.utils import evaluation_paths
+from nuwa.species import add_species_argument, normalize_species
 
 
 def main():
@@ -113,8 +55,7 @@ def main():
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT,
                         help="AP-10K folder; default: data/ap-10k")
-    parser.add_argument("--species", default=DEFAULT_SPECIES,
-                        help="One species, or all; default: dog")
+    add_species_argument(parser, default=DEFAULT_SPECIES)
     parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--ann-file", help="Optional prefiltered annotation file")
@@ -124,6 +65,7 @@ def main():
     args = parser.parse_args()
 
     try:
+        args.species = normalize_species(args.species)
         config_path = resolve_input_file(args.config, "--config")
         checkpoint_path = resolve_input_file(args.checkpoint, "--checkpoint")
         device = resolve_device(args.device)
@@ -165,7 +107,7 @@ def main():
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     print("Species: {} | Split: {} (split {}) | Animals: {}".format(
-        args.species, args.split, args.split_id, len(dataset)), flush=True)
+        ", ".join(args.species), args.split, args.split_id, len(dataset)), flush=True)
     print("Annotations:", annotation_path, flush=True)
     print("Checkpoint:", checkpoint_path, flush=True)
     print("Device:", device, flush=True)

@@ -217,7 +217,7 @@ def checkpoint_header(path):
     if not isinstance(payload, dict):
         raise ValueError("Expected a state_dict checkpoint")
     keys = ("stage", "species", "split", "base_checkpoint_sha256", "source_anchor_sha256",
-            "source_checkpoint_sha256", "origin_checkpoint_sha256", "category_id",
+            "source_checkpoint_sha256", "origin_checkpoint_sha256", "category_id", "category_ids",
             "smoke_test", "source_smoke_test", "skp_applied", "attention_svd_applied", "mlp_strategy",
             "finetuned", "finetune_step", "finetune_val_ap")
     result = {key: payload[key] for key in keys if key in payload}
@@ -229,7 +229,7 @@ def checkpoint_header(path):
 def export_portable(model, info, cfg, source_path, output_path, base_sha256=None):
     """Export model weights only; strip optimizers and training logs consistently."""
     retained = (
-        "species", "category_id", "split", "base_checkpoint_sha256", "source_anchor_sha256",
+        "species", "category_id", "category_ids", "split", "base_checkpoint_sha256", "source_anchor_sha256",
         "source_masks_sha256", "source_mask_step", "source_mask_val_ap", "baseline_val_ap",
         "target_pruning_rate", "achieved_pruning_rate", "smoke_test", "source_smoke_test",
         "skp_applied", "attention_svd_applied", "mlp_strategy",

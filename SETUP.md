@@ -265,6 +265,23 @@ python main.py prepare --species dog
 Species preparation writes filtered annotation files under
 `data/ap-10k/annotations/species/dog/` and reuses the original images.
 
+For one model covering several species, prepare their union and use the same
+list for derivation:
+
+```console
+python main.py prepare --species dog cat
+python main.py derive --species dog cat --pruning-rate 0.4 --smoke-test --out-dir outputs/cat_dog_smoke
+python main.py evaluate --checkpoint outputs/cat_dog_smoke/ofp/edge.pth
+```
+
+The combined subset is stored under `annotations/species/cat__dog/` inside
+the data root. Ordering and capitalization do not change the selection.
+Quote multiword names, for example `--species cat "brown bear"`. Use
+`--species all` for the complete official train/validation annotations.
+Evaluation and later model stages can inherit the selected species list
+from the checkpoint. Single-species commands and older checkpoints are
+also supported.
+
 ### CPU smoke run
 
 ```console

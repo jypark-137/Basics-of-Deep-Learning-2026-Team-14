@@ -23,6 +23,7 @@ from device_utils import add_device_argument, resolve_device
 from ..model.checkpoint import load_pose_checkpoint
 from ..dataset.utils import evaluation_paths, move_batch
 from .io import atomic_json, atomic_torch_save, state_size_bytes
+from ..species import normalize_species
 
 MAC_CONVENTION = (
     "One multiply-accumulate = one MAC; counts Linear, Conv2d, ConvTranspose2d, "
@@ -108,9 +109,7 @@ def set_seed(seed):
 def get_sub_task(args):
     """Return the species task; the loader selects animals, not joint channels."""
     species = getattr(args, "species", None) or DEFAULT_SPECIES
-    if not isinstance(species, str) or not species.strip():
-        raise ValueError("Use a nonempty AP-10K species name, or all")
-    return species.strip()
+    return normalize_species(species)
 
 
 @torch.no_grad()

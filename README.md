@@ -20,6 +20,7 @@ outputs/                   generated models, logs and reports
 nuwa/
   __main__.py                python -m nuwa entry point
   paths.py                   shared paths and local ViTPose discovery
+  species.py                 shared species lists and subset identifiers
   engine/
     eval.py                  official evaluation; AP fractions and AP points
     train.py                 optional supervised fine-tuning
@@ -81,6 +82,34 @@ and metrics; learned SKP masks; anchor, pruned and fine-tuned model weights;
 training logs; calibration scores; profiling and comparison reports; and run
 configs/manifests. Source pretrained weights live in `checkpoints/`, and
 dataset images and species annotations live in `data/`.
+
+## Select a species list
+
+Pass multiple names after `--species` to produce one model specialized for
+their combined annotations:
+
+```console
+python main.py prepare --species dog cat
+python main.py derive --species dog cat --pruning-rate 0.4 --out-dir outputs/cat_dog
+python main.py evaluate --checkpoint outputs/cat_dog/ofp/edge.pth
+```
+
+Preparation writes the union to `data/ap-10k/annotations/species/cat__dog/`.
+Original animal/category IDs and official splits are retained; images shared
+by selected species appear once. Mask learning and calibration use the
+combined training subset, and AP uses the combined validation subset. The
+model retains all 17 keypoint channels.
+
+Species names are case-insensitive and order-independent. Quote names with
+spaces, for example `--species cat "brown bear"`. A single name still works,
+and `--species all` selects the official complete annotations. Use
+`python main.py prepare --list` to see valid names.
+
+Saved masks/models record the complete species list. Pruning, fine-tuning,
+evaluation, comparison and ablation inherit that list from their input
+checkpoint when `--species` is omitted. An explicit list must match the
+checkpoint selection. Existing checkpoints containing a single species
+string remain supported.
 
 ## CPU and GPU execution
 

@@ -15,6 +15,7 @@ from ..dataset.utils import evaluation_paths, move_batch
 from ..model.checkpoint import BASE_STAGE, load_pose_checkpoint
 from device_utils import add_device_argument, resolve_device
 from ..utils.io import atomic_json
+from ..species import add_species_argument, normalize_species
 
 @torch.no_grad()
 def evaluate_metrics(model, test_loader, device=None, output_dir=None, progress=True, save_predictions=True):
@@ -76,7 +77,7 @@ def get_args_parser():
                         help="Unpruned split weights, SKP anchor.pth, or OFP edge.pth")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--species", help="Default: checkpoint species, or dog for a baseline")
+    add_species_argument(parser)
     parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3))
     parser.add_argument("--ann-file", help="Optional prefiltered annotation file")
@@ -103,10 +104,8 @@ def run(args, parser=None):
     cfg = Config.fromfile(str(config_path))
     model, info = load_pose_checkpoint(cfg, checkpoint_path, device)
     stage = info.get("stage", BASE_STAGE)
-    species = args.species or info.get("species") or DEFAULT_SPECIES
-    if not isinstance(species, str) or not species.strip():
-        parser.error("Use a nonempty species name, or all")
-    if stage != BASE_STAGE and str(info.get("species", "")).strip().casefold() != species.strip().casefold():
+    species = normalize_species(args.species or info.get("species") or DEFAULT_SPECIES)
+    if stage != BASE_STAGE and normalize_species(info.get("species")) != species:
         parser.error("--species must match the species used to learn this checkpoint")
     split_id = args.split_id or info.get("split", 1)
     if split_id not in (1, 2, 3):
@@ -131,7 +130,7 @@ def run(args, parser=None):
         / slug / "{}_split{}".format(args.split, split_id)
     )
     print("Species: {} | Split: {} (split {}) | Animals: {}".format(
-        species, args.split, split_id, len(dataset)), flush=True)
+        ", ".join(species), args.split, split_id, len(dataset)), flush=True)
     print("Checkpoint:", checkpoint_path, "| Device:", device, flush=True)
     metrics = evaluate_metrics(model, loader, device, output_dir)
     report = {

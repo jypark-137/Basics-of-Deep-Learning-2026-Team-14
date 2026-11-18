@@ -9,7 +9,6 @@ import math
 from numbers import Integral
 import os
 from pathlib import Path
-import re
 import tempfile
 import numpy as np
 import torch
@@ -19,11 +18,12 @@ from ..paths import (
     resolve_input_file, resolve_project_path,
 )
 from ..model.vit import AttentionPruned, _attention_spec, _linear_like, attention_specs, forward_heatmaps, hidden_sizes
-from ..model.checkpoint import ANCHOR_STAGE, BASE_STAGE, OFP_STAGE, load_anchor_model, load_nuwa_model, load_pose_checkpoint
+from ..model.checkpoint import ANCHOR_STAGE, BASE_STAGE, OFP_STAGE, checkpoint_header, load_anchor_model, load_nuwa_model, load_pose_checkpoint
 from device_utils import add_device_argument, resolve_device
 from ..utils.io import atomic_torch_save, file_sha256, frozen_state_sha256
 from ..utils.utils import profile_pose_macs, seed_all
 from .get_calibration_data import calibration_options, collect_training_features, get_activation_and_calibration_features, get_config_and_indices, uniform_widths
+from ..species import add_species_argument, normalize_species, species_slug
 
 def energy_ratio(pruning_rate):
     alpha = float(pruning_rate)
@@ -366,7 +366,7 @@ def get_args_parser():
                         help="Target fraction of full-pose matrix MACs removed, e.g. 0.4")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--species", help="Default: the anchor's species (dog)")
+    add_species_argument(parser)
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3), help="Default: anchor split, or 1 for a base checkpoint")
     parser.add_argument("--strategy", choices=("optimize", "prune"), default="optimize",
                         help="optimize is vanilla OFP; prune disables reconstruction for ablation")
@@ -389,6 +389,8 @@ def run(args, parser=None):
         rho = energy_ratio(args.pruning_rate)
         config_path = resolve_input_file(args.config, "--config")
         anchor_path = resolve_input_file(args.anchor or args.base_checkpoint, "--anchor/--base-checkpoint")
+        source_header = checkpoint_header(anchor_path)
+        args.species = normalize_species(args.species or source_header.get("species") or DEFAULT_SPECIES)
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
     if args.calibration_samples <= 0:
@@ -407,7 +409,7 @@ def run(args, parser=None):
         name += "_prune"
     if args.smoke_test:
         name += "_smoke"
-    slug = re.sub(r"[^a-z0-9]+", "_", (args.species or DEFAULT_SPECIES).casefold()).strip("_")
+    slug = species_slug(args.species or DEFAULT_SPECIES)
     default_parent = DEFAULT_OUTPUT_ROOT / "nuwa_ablations" / slug if args.base_checkpoint else anchor_path.parent
     output_dir = resolve_project_path(args.out_dir) if args.out_dir else default_parent / name
     if output_dir.exists():
@@ -434,12 +436,13 @@ def run(args, parser=None):
         model, source_info = load_pose_checkpoint(cfg, anchor_path, device)
         if source_info.get("stage") != BASE_STAGE:
             parser.error("--base-checkpoint must be the original unpruned split checkpoint")
-        anchor = {"stage": BASE_STAGE, "species": args.species or DEFAULT_SPECIES,
+        anchor = {"stage": BASE_STAGE, "species": args.species,
                   "split": args.split_id or 1, "base_checkpoint_sha256": file_sha256(anchor_path),
                   "architecture": {"original_hidden_sizes": original_hidden}, "skp_applied": False}
-    species = args.species or anchor.get("species")
-    if not isinstance(species, str) or not isinstance(anchor.get("species"), str) or species.strip().casefold() != anchor["species"].strip().casefold():
+    species = normalize_species(args.species or anchor.get("species"))
+    if normalize_species(anchor.get("species")) != species:
         parser.error("Species must match the anchor's species")
+    args.species = species
     split_id = anchor.get("split")
     if split_id not in (1, 2, 3):
         parser.error("Invalid split ID in anchor checkpoint")
@@ -495,6 +498,7 @@ def run(args, parser=None):
         achieved = 1 - final_profile["pose_macs"] / original_profile["pose_macs"]
         report = {
             "stage": OFP_STAGE, "species": species, "category_id": anchor.get("category_id"),
+            "category_ids": anchor.get("category_ids"),
             "split": split_id, "config_path": str(config_path),
             "source_anchor": str(anchor_path) if args.anchor else None,
             "source_anchor_sha256": file_sha256(anchor_path) if args.anchor else None,

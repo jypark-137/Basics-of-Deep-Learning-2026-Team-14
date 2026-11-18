@@ -31,6 +31,7 @@ from ..utils.utils import profile_pose_macs, set_seed
 from ..model.vit import forward_heatmaps
 from .get_anchor_model import get_anchor_model
 from .pruning import pruning_vit
+from ..species import add_species_argument, normalize_species, species_slug
 
 
 def class_specific_derivation_nuwa(args, model, retrain=False):
@@ -40,10 +41,15 @@ def class_specific_derivation_nuwa(args, model, retrain=False):
     model.to(args.device).eval()
     original_widths = hidden_sizes(model)
     original_profile, _ = profile_pose_macs(model, pose_input(model, cfg), forward_heatmaps)
-    train_loader, val_loader = get_dataloader(args, cfg)
     if getattr(args, "anchor", None):
-        model_anchor, _ = load_anchor_model(cfg, args.anchor, args.device)
+        model_anchor, info = load_anchor_model(cfg, args.anchor, args.device)
+        args.species = normalize_species(getattr(args, "species", None) or info.get("species"))
+        if args.species != normalize_species(info.get("species")):
+            raise ValueError("Species must match the anchor's species")
     else:
+        args.species = normalize_species(getattr(args, "species", None) or DEFAULT_SPECIES)
+    train_loader, val_loader = get_dataloader(args, cfg)
+    if not getattr(args, "anchor", None):
         model_anchor = get_anchor_model(args, model, train_loader, val_loader)
     model_pruned = pruning_vit(args, model_anchor, original_profile)
     if retrain:
@@ -63,7 +69,7 @@ def get_args_parser():
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT, help="Original split ViTPose weights")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--species")
+    add_species_argument(parser)
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3))
     reuse = parser.add_mutually_exclusive_group()
     reuse.add_argument("--anchor", help="Reuse an exported anchor; skip mask learning")
@@ -141,7 +147,9 @@ def run(args, parser=None):
     if args.masks:
         masks = torch.load(str(source), map_location="cpu")
         header = {key: masks.get(key) for key in ("species", "split")}
-    args.species = args.species or header.get("species") or DEFAULT_SPECIES
+    args.species = normalize_species(args.species or header.get("species") or DEFAULT_SPECIES)
+    if args.masks and args.species != normalize_species(header.get("species")):
+        parser.error("--species must match the species used to learn these masks")
     args.split_id = args.split_id or header.get("split") or 1
     args.data_root = str(resolve_data_root(args.data_root))
     base_header = checkpoint_header(base)
@@ -163,7 +171,7 @@ def run(args, parser=None):
                      "source_sha256": file_sha256(source) if source else None})
     signature = fingerprint(settings)
     directory = resolve_project_path(args.out_dir) if args.out_dir else (
-        DEFAULT_OUTPUT_ROOT / "nuwa" / args.species / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
+        DEFAULT_OUTPUT_ROOT / "nuwa" / species_slug(args.species) / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
     )
     manifest_path = directory / "run_manifest.json"
     if directory.exists():
@@ -188,7 +196,7 @@ def run(args, parser=None):
             if anchor_dir.exists() and not args.masks:
                 parser.error("Incomplete anchor stage: explicitly select saved --masks or use a new run folder")
             _fresh_stage_directory(anchor_dir, directory, args.resume)
-            command = common + ["--species", args.species, "--split", str(args.split_id),
+            command = common + ["--species", *args.species, "--split", str(args.split_id),
                                 "--out-dir", str(anchor_dir), "--steps", str(args.steps),
                                 "--batch-size", str(args.batch_size), "--mask-lr", str(args.mask_lr),
                                 "--beta-lr", str(args.beta_lr), "--weight-decay", str(args.weight_decay),
@@ -208,7 +216,7 @@ def run(args, parser=None):
                 "smoke_test": args.smoke_test}
     if not _completed(prune_dir, "edge.pth", "ofp_report.json", expected, manifest["completed"].get("ofp")):
         _fresh_stage_directory(prune_dir, directory, args.resume)
-        command = common + ["--anchor", str(anchor_path), "--species", args.species,
+        command = common + ["--anchor", str(anchor_path), "--species", *args.species,
                             "--split-id", str(args.split_id), "--pruning-rate", str(args.pruning_rate),
                             "--strategy", args.strategy, "--calibration-samples", str(args.calibration_samples),
                             "--out-dir", str(prune_dir)]
@@ -230,7 +238,7 @@ def run(args, parser=None):
                           manifest["completed"].get("finetune")):
             if train_dir.exists():
                 parser.error("Incomplete fine-tuning stage: select its checkpoint with the train command")
-            command = common + ["--checkpoint", str(edge), "--species", args.species,
+            command = common + ["--checkpoint", str(edge), "--species", *args.species,
                                 "--split-id", str(args.split_id), "--out-dir", str(train_dir),
                                 "--steps", str(args.finetune_steps), "--batch-size", str(args.batch_size),
                                 "--learning-rate", str(args.learning_rate), "--weight-decay", str(args.weight_decay)]
@@ -243,7 +251,7 @@ def run(args, parser=None):
         edges.append("finetuned=" + str(selected))
     if not args.skip_comparison:
         command = ["--checkpoint", str(base), "--anchor", str(anchor_path), "--edge"] + edges + [
-            "--config", str(config), "--data-root", args.data_root, "--species", args.species,
+            "--config", str(config), "--data-root", args.data_root, "--species", *args.species,
             "--device", args.device,
             "--split-id", str(args.split_id), "--threads", str(args.threads), "--seed", str(args.seed),
             "--warmup", str(args.warmup), "--repeats", str(args.repeats), "--out-dir", str(directory / "comparison")]
@@ -252,7 +260,7 @@ def run(args, parser=None):
         if args.resume:
             command.append("--resume")
         finalize_pose.main(command)
-    result = {"anchor": str(anchor_path), "edge": str(edge), "selected_model": str(selected),
+    result = {"species": args.species, "anchor": str(anchor_path), "edge": str(edge), "selected_model": str(selected),
               "comparison": None if args.skip_comparison else str(directory / "comparison/comparison.md"),
               "smoke_test": args.smoke_test}
     atomic_json(directory / "nuwa_result.json", result)

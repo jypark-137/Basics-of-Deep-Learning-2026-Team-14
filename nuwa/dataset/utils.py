@@ -4,22 +4,18 @@
 import copy
 import json
 import os
-import re
 import torch
 from ..paths import DEFAULT_DATA_ROOT, DEFAULT_SPECIES, resolve_data_root, resolve_input_file
 from ..model.utils import pose_config
 from device_utils import resolve_device
+from ..species import category_ids, normalize_species, species_slug
 
 def evaluation_paths(data_root, species, split, split_id, ann_file=None):
     """Validate the selected dataset without loading images."""
     data_root = resolve_data_root(data_root)
-    species = species.strip()
-    if not species:
-        raise ValueError("Species cannot be empty; use dog or all")
-    all_species = species.casefold() == "all"
-    slug = "all" if all_species else re.sub(r"[^a-z0-9]+", "_", species.casefold()).strip("_")
-    if not slug:
-        raise ValueError("Use a species name from prepare_species.py --list")
+    species = normalize_species(species)
+    all_species = species == ["all"]
+    slug = species_slug(species)
 
     filename = "ap10k-{}-split{}.json".format(split, split_id)
     if ann_file is not None:
@@ -50,17 +46,12 @@ def evaluation_paths(data_root, species, split, split_id, ann_file=None):
     for key in ("images", "annotations", "categories"):
         if not isinstance(annotations.get(key), list) or not annotations[key]:
             raise ValueError("{} needs a nonempty {} list".format(annotation_path, key))
-    if not all_species:
-        matches = [category["id"] for category in annotations["categories"]
-                   if category["name"].strip().casefold() == species.casefold()]
-        if len(matches) != 1:
-            raise ValueError("Species {!r} is not unique in the annotations".format(species))
-        if any(annotation["category_id"] != matches[0]
-               for annotation in annotations["annotations"]):
-            raise ValueError(
-                "The selected annotations include other species. Use a filtered "
-                "subset for {!r}, or --species all for all species.".format(species)
-            )
+    selected_ids = set(category_ids(annotations["categories"], species))
+    present_ids = {annotation["category_id"] for annotation in annotations["annotations"]}
+    if not present_ids <= selected_ids:
+        raise ValueError("The selected annotations include species outside {}".format(species))
+    if not all_species and present_ids != selected_ids:
+        raise ValueError("The selected annotations must include every requested species: {}".format(species))
     image_ids = {image["id"] for image in annotations["images"]}
     if any(annotation["image_id"] not in image_ids for annotation in annotations["annotations"]):
         raise ValueError("Some annotations refer to missing image records")
@@ -71,28 +62,24 @@ def evaluation_paths(data_root, species, split, split_id, ann_file=None):
 
 
 def validate_subsets(data_root, species, split):
-    """Require the existing species preparation files and guard against mixed-species data."""
-    slug = re.sub(r"[^a-z0-9]+", "_", species.strip().casefold()).strip("_")
-    if not slug:
-        raise ValueError("Use a species name from prepare_species.py --list")
-    subset_dir = data_root / "annotations" / "species" / slug
-    paths, filenames, category_ids = {}, {}, []
+    """Validate a prepared species union and preserve the official train/val split."""
+    data_root = resolve_data_root(data_root)
+    species = normalize_species(species)
+    slug = species_slug(species)
+    paths, filenames, selected_ids = {}, {}, []
     for part in ("train", "val"):
-        path = subset_dir / "ap10k-{}-split{}.json".format(part, split)
-        if not path.is_file():
-            raise ValueError("Missing species preparation subset: {}. Run prepare_species.py first.".format(path))
+        path, _, _ = evaluation_paths(data_root, species, part, split)
         with path.open("r", encoding="utf-8-sig") as handle:
             data = json.load(handle)
         for key in ("images", "annotations", "categories"):
             if not isinstance(data.get(key), list) or not data[key]:
                 raise ValueError("{} needs a nonempty {} list".format(path, key))
-        matches = [item["id"] for item in data["categories"]
-                   if item["name"].strip().casefold() == species.strip().casefold()]
-        if len(matches) != 1:
-            raise ValueError("Species name is not unique in {}".format(path))
-        category_id = matches[0]
-        if any(item["category_id"] != category_id for item in data["annotations"]):
-            raise ValueError("{} includes other species' annotations".format(path))
+        ids = category_ids(data["categories"], species)
+        for category_id in ids:
+            if not any(item["category_id"] == category_id and not item.get("iscrowd", 0)
+                       and any(value > 0 for value in item.get("keypoints", [])[2::3])
+                       for item in data["annotations"]):
+                raise ValueError("No labeled {} animals for category {}".format(part, category_id))
         image_ids = {item["id"] for item in data["images"]}
         if any(item["image_id"] not in image_ids for item in data["annotations"]):
             raise ValueError("{} contains annotations with missing image records".format(path))
@@ -101,12 +88,12 @@ def validate_subsets(data_root, species, split):
             if not (data_root / "data" / filename).is_file():
                 raise ValueError("Image not found: {}".format(data_root / "data" / filename))
         paths[part] = path
-        category_ids.append(category_id)
-    if len(set(category_ids)) != 1:
+        selected_ids.append(ids)
+    if selected_ids[0] != selected_ids[1]:
         raise ValueError("Train and validation category IDs differ")
     if filenames["train"] & filenames["val"]:
         raise ValueError("Species train and validation contain overlapping image filenames")
-    return slug, paths, category_ids[0]
+    return slug, paths, selected_ids[0]
 
 
 def make_loaders(cfg, paths, data_root, args):

@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 from ..paths import DEFAULT_OUTPUT_ROOT
 from ..utils.io import atomic_torch_save, file_sha256, frozen_state_sha256
+from ..species import normalize_species
 
 @torch.no_grad()
 def export_masks(model):
@@ -118,7 +119,7 @@ def save_mask(args, model_mask, pruning_rate=None):
     directory = Path(args.out_dir or DEFAULT_OUTPUT_ROOT / "masks")
     directory.mkdir(parents=True, exist_ok=True)
     original_keys = [key for key in model_mask.state_dict() if not key.endswith((".mask", ".beta"))]
-    metadata = {"species": args.species, "split": args.split,
+    metadata = {"species": normalize_species(args.species), "split": args.split,
                 "base_checkpoint_sha256": file_sha256(args.checkpoint),
                 "original_state_sha256": frozen_state_sha256(model_mask, original_keys)}
     if pruning_rate is not None:

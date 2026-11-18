@@ -19,6 +19,7 @@ from ..model.vit import forward_heatmaps, hidden_sizes
 from device_utils import resolve_device
 from ..utils.io import file_sha256
 from ..utils.utils import seed_all
+from ..species import normalize_species
 
 def calibration_options(args):
     """Accept the current CLI names and NuWa's calibration_sample_num alias."""
@@ -45,6 +46,7 @@ def calibration_options(args):
     if args.strategy not in ("optimize", "prune"):
         raise ValueError("Use the existing optimize or prune MLP strategy")
     args.device = str(resolve_device(args.device))
+    args.species = normalize_species(args.species)
     return args
 
 
@@ -156,7 +158,8 @@ def collect_training_features(cfg, model, args, species, split_id, token_counts,
             if array is not None:
                 array.flush()
                 array._mmap.close()
-    return scores, paths, {"annotation_file": str(annotation_path) if annotation_path else None,
+    return scores, paths, {"species": normalize_species(species),
+                           "annotation_file": str(annotation_path) if annotation_path else None,
                            "annotation_sha256": file_sha256(annotation_path) if annotation_path else None,
                            "training_crops_processed": count, "calibration_crops": samples,
                            "calibration_dataset_indices": chosen, "seed": args.seed,

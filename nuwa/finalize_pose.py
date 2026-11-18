@@ -23,6 +23,7 @@ from .model.checkpoint import BASE_STAGE, OFP_STAGE, checkpoint_header, export_p
 from .utils.utils import MAC_CONVENTION, benchmark_pose, profile_pose_macs
 from .utils.io import atomic_json, atomic_text, file_sha256, fingerprint, state_size_bytes
 from .utils.pose_results import parse_edges, validate_provenance, write_comparison
+from .species import add_species_argument, normalize_species
 
 def code_fingerprint():
     files = list(PACKAGE_ROOT.glob("*.py"))
@@ -44,7 +45,7 @@ def get_args_parser():
     parser.add_argument("--edge", required=True, nargs="+", help="One or more PATH or NAME=PATH values")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--species", default=DEFAULT_SPECIES)
+    add_species_argument(parser)
     parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3))
     parser.add_argument("--ann-file", help="Optional common prefiltered annotation file")
@@ -90,6 +91,7 @@ def run(args, parser=None):
     cfg = Config.fromfile(str(config_path))
     base_header = checkpoint_header(cases[0]["checkpoint"])
     anchor_header = checkpoint_header(cases[1]["checkpoint"])
+    args.species = normalize_species(args.species or anchor_header.get("species") or DEFAULT_SPECIES)
     base_ids = {value for value in (cases[0]["sha256"], base_header.get("base_checkpoint_sha256"),
                 base_header.get("source_checkpoint_sha256"), base_header.get("origin_checkpoint_sha256")) if value}
     anchor_ids = {value for value in (cases[1]["sha256"], anchor_header.get("source_checkpoint_sha256"),

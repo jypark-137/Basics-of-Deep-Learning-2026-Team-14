@@ -17,6 +17,7 @@ from .model.utils import config_snapshot
 from device_utils import add_device_argument, device_info, resolve_device
 from .utils.io import atomic_json, file_sha256, fingerprint
 from .utils.pose_results import ABLATIONS, ablation_cases, validate_provenance
+from .species import add_species_argument, normalize_species
 
 def get_args_parser():
     parser = argparse.ArgumentParser(description=__doc__,
@@ -27,7 +28,7 @@ def get_args_parser():
     parser.add_argument("--variants", nargs="+", choices=list(ABLATIONS), default=list(ABLATIONS))
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--species", default=DEFAULT_SPECIES)
+    add_species_argument(parser)
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3))
     parser.add_argument("--calibration-samples", type=int, default=128)
     add_device_argument(parser)
@@ -61,6 +62,7 @@ def run(args, parser=None):
 
     anchor_hash, base_hash = file_sha256(anchor_path), file_sha256(base_path)
     header, base_header = checkpoint_header(anchor_path), checkpoint_header(base_path)
+    args.species = normalize_species(args.species or header.get("species") or DEFAULT_SPECIES)
     split_id = args.split_id or header.get("split", 1)
     base_ids = {value for value in (base_hash, base_header.get("base_checkpoint_sha256"),
                 base_header.get("source_checkpoint_sha256"), base_header.get("origin_checkpoint_sha256")) if value}
@@ -142,7 +144,7 @@ def run(args, parser=None):
                        "--pruning-rate", str(case["rate"]), "--strategy",
                        "optimize" if case["reconstruction"] else "prune",
                        "--config", str(config_path), "--data-root", args.data_root,
-                       "--species", args.species, "--split-id", str(split_id),
+                       "--species", *args.species, "--split-id", str(split_id),
                        "--calibration-samples", str(args.calibration_samples),
                        "--seed", str(args.seed), "--device", args.device, "--threads", str(args.threads),
                        "--out-dir", str(directory)]
@@ -159,7 +161,7 @@ def run(args, parser=None):
         edge_arguments.append(label + "=" + str(edge))
     command = [sys.executable, "-m", "nuwa", "compare", "--checkpoint", str(base_path),
                "--anchor", str(anchor_path), "--edge"] + edge_arguments + [
-               "--config", str(config_path), "--data-root", args.data_root, "--species", args.species,
+               "--config", str(config_path), "--data-root", args.data_root, "--species", *args.species,
                "--split-id", str(split_id), "--threads", str(args.threads),
                "--device", args.device,
                "--warmup", str(args.warmup), "--repeats", str(args.repeats), "--seed", str(args.seed),

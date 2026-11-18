@@ -9,7 +9,6 @@ import math
 import os
 from pathlib import Path
 import random
-import re
 import tempfile
 import time
 import numpy as np
@@ -20,7 +19,8 @@ from ..paths import (
     DEFAULT_SPECIES, resolve_data_root, resolve_input_file, resolve_project_path,
 )
 from ..model.vit import get_nuwa_backbone, forward_heatmaps, heatmap_task_loss, hidden_sizes, mlp_layers
-from ..model.checkpoint import ANCHOR_STAGE, apply_saved_masks, load_anchor_model, prune_skp_mlp, saved_binary_masks
+from ..model.checkpoint import ANCHOR_STAGE, apply_saved_masks, checkpoint_header, load_anchor_model, prune_skp_mlp, saved_binary_masks
+from ..species import add_species_argument, normalize_species, species_slug
 from device_utils import add_device_argument, resolve_device
 from ..dataset.utils import make_loaders, move_batch, validate_subsets
 from ..engine.eval import evaluate_ap
@@ -221,6 +221,7 @@ def _options(args, train_loader=None):
             or min(args.mask_lr, args.beta_lr) <= 0 or args.weight_decay < 0):
         raise ValueError("Learning rates must be positive and weight decay nonnegative")
     args.device = str(resolve_device(args.device))
+    args.species = normalize_species(args.species or DEFAULT_SPECIES)
     args.data_root = str(resolve_data_root(args.data_root))
     if args.out_dir:
         args.out_dir = str(resolve_project_path(args.out_dir))
@@ -272,9 +273,7 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
     config_path = resolve_input_file(args.config, "--config")
     checkpoint_path = resolve_input_file(args.checkpoint, "--checkpoint")
     data_root = Path(args.data_root)
-    slug = re.sub(r"[^a-z0-9]+", "_", args.species.strip().casefold()).strip("_")
-    if not slug:
-        raise ValueError("Use a nonempty species name")
+    slug = species_slug(args.species)
     category_id = getattr(args, "category_id", None)
     original_keys = list(model.state_dict())
     original_digest = frozen_state_sha256(model, original_keys)
@@ -306,7 +305,8 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
         {"params": masks, "lr": args.mask_lr, "weight_decay": args.weight_decay},
         {"params": betas, "lr": args.beta_lr, "weight_decay": args.weight_decay},
     ], betas=(0.9, 0.999), eps=1e-8, amsgrad=False)
-    metadata = {"species": args.species, "category_id": category_id, "split": args.split,
+    metadata = {"species": args.species, "category_id": category_id,
+                "category_ids": getattr(args, "category_ids", None), "split": args.split,
                 "base_checkpoint": str(checkpoint_path), "base_checkpoint_sha256": file_sha256(checkpoint_path),
                 "config_path": str(config_path), "training_settings": settings,
                 "original_state_sha256": original_digest}
@@ -420,6 +420,8 @@ def get_mask(args, model, train_loader=None, test_loader=None):
             detach_skp_masks(model)
         path = resolve_input_file(args.masks, "--masks")
     payload = torch.load(str(path), map_location="cpu")
+    if normalize_species(payload.get("species")) != args.species:
+        raise ValueError("--species must match the species used to learn these masks")
     saved_binary_masks(payload, model)
     base_path = resolve_input_file(args.checkpoint, "--checkpoint")
     if payload.get("base_checkpoint_sha256") != file_sha256(base_path):
@@ -514,8 +516,9 @@ def export_anchor(args, model, masks):
     if source_ap is not None and not math.isfinite(float(source_ap)):
         raise ValueError("The mask checkpoint contains an invalid validation AP")
     report = {
-        "stage": ANCHOR_STAGE, "species": masks.get("species"),
-        "category_id": masks.get("category_id"), "split": masks.get("split"),
+        "stage": ANCHOR_STAGE, "species": normalize_species(masks.get("species")),
+        "category_id": masks.get("category_id"), "category_ids": masks.get("category_ids"),
+        "split": masks.get("split"),
         "config_path": str(config_path), "base_checkpoint": str(base_path),
         "base_checkpoint_sha256": base_hash, "source_masks": str(masks_path),
         "source_masks_sha256": file_sha256(masks_path), "source_mask_step": masks.get("step"),
@@ -570,7 +573,7 @@ def get_args_parser():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--masks", help="Reuse SKP masks and skip training/data loading")
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--species", default=DEFAULT_SPECIES)
+    add_species_argument(parser)
     parser.add_argument("--split", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
@@ -598,6 +601,7 @@ def run(args, parser=None):
     if args.self_test:
         self_test()
         return
+    requested_species = args.species
     try:
         args = _options(args)
         args.config = str(resolve_input_file(args.config, "--config"))
@@ -607,6 +611,8 @@ def run(args, parser=None):
         parser.error(str(error))
     if masks_path is not None:
         args.masks = str(masks_path)
+        if requested_species is None:
+            args.species = normalize_species(checkpoint_header(masks_path).get("species"))
     output_dir = Path(args.out_dir) if args.out_dir else (masks_path.parent if masks_path else None)
     if output_dir is not None and any((output_dir / name).exists()
                                      for name in ("anchor.pth", "anchor_report.json")):
@@ -626,7 +632,8 @@ def run(args, parser=None):
         data_root = resolve_data_root(args.data_root)
         args.data_root = str(data_root.resolve())
         try:
-            _, paths, args.category_id = validate_subsets(data_root, args.species, args.split)
+            _, paths, args.category_ids = validate_subsets(data_root, args.species, args.split)
+            args.category_id = args.category_ids[0] if len(args.category_ids) == 1 else None
         except ValueError as error:
             parser.error(str(error))
         train_loader, val_loader = make_loaders(cfg, paths, data_root, args)

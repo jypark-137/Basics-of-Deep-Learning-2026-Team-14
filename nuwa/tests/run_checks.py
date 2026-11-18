@@ -17,11 +17,12 @@ def run(args, parser=None):
         check_anchor.main()
         check_ofp.check_torch()
         check_final_steps.check_torch()
-        from . import test_configuration, test_devices, test_training
+        from . import test_configuration, test_devices, test_species, test_training
         import unittest
         suite = unittest.defaultTestLoader.loadTestsFromModule(test_training)
         suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_configuration))
         suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_devices))
+        suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_species))
         if not unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful():
             raise RuntimeError("Fine-tuning checks failed")
     print("NuWa checks: PASS")
