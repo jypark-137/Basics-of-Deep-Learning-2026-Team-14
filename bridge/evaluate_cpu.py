@@ -1,24 +1,27 @@
-"""Evaluate the unpruned split ViTPose model on AP-10K using CPU.
+"""Evaluate the unpruned split ViTPose model on AP-10K using CUDA or CPU.
 
 Keep this file, check_split.py and bridge_paths.py in bridge/.
 Run from the project root:
 
     python bridge/evaluate_cpu.py
     python bridge/evaluate_cpu.py --species all --split test
+    python bridge/evaluate_cpu.py --device cpu
 
-The default is DOG VALIDATION, using the annotation subset from step 1.
+The default is DOG VALIDATION, using the prepared species annotation subset.
 Use --species all for the original complete validation/test annotations.
-Species-specific test annotations must be provided separately: step 1 only
-creates train/validation subsets. --ann-file can select a custom annotation
-file; it must contain only the requested species unless --species all is used.
+Species-specific test annotations must be provided separately:
+prepare_species.py creates train/validation subsets. --ann-file can select a
+custom annotation file; it must contain only the requested species unless
+--species all is used.
 
-The default data root is bridge/data/ap10k, containing annotations/ and data/.
+CUDA is selected when available; --device cpu forces CPU execution.
+The legacy filename is retained for existing commands.
+The default data root is bridge/data/ap-10k, containing annotations/ and data/.
 Configs use vitpose/configs/. The checkpoint is bridge/checkpoints/split/ap10k.pth.
-Local mmpose imports work through bridge_paths.py without an editable install.
 
 The model configuration's preprocessing, flip testing, bounding-box settings
 and official dataset.evaluate(..., metric='mAP') scoring are preserved.
-Predictions and metrics are saved under bridge/work_dirs/<species>_baseline_cpu/.
+Predictions and metrics are saved under bridge/work_dirs/<species>_baseline_<device>/.
 This evaluates an ordinary full-weight checkpoint; SKP mask-only files are
 not standalone models and are not accepted as --checkpoint.
 """
@@ -27,24 +30,25 @@ import argparse
 import json
 import math
 import os
-from pathlib import Path
 import re
 
 if __package__:
     from .bridge_paths import (
-        DEFAULT_DATA_ROOT, DEFAULT_OUTPUT_ROOT, DEFAULT_SPECIES, resolve_input_file,
+        DEFAULT_DATA_ROOT, DEFAULT_OUTPUT_ROOT, DEFAULT_SPECIES, add_device_argument,
+        resolve_data_root, resolve_device, resolve_input_file, resolve_project_path,
     )
     from .check_split import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, load_pose_model
 else:
     from bridge_paths import (
-        DEFAULT_DATA_ROOT, DEFAULT_OUTPUT_ROOT, DEFAULT_SPECIES, resolve_input_file,
+        DEFAULT_DATA_ROOT, DEFAULT_OUTPUT_ROOT, DEFAULT_SPECIES, add_device_argument,
+        resolve_data_root, resolve_device, resolve_input_file, resolve_project_path,
     )
     from check_split import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, load_pose_model
 
 
 def evaluation_paths(data_root, species, split, split_id, ann_file=None):
     """Validate the selected dataset without loading images."""
-    data_root = Path(data_root)
+    data_root = resolve_data_root(data_root)
     species = species.strip()
     if not species:
         raise ValueError("Species cannot be empty; use dog or all")
@@ -55,7 +59,7 @@ def evaluation_paths(data_root, species, split, split_id, ann_file=None):
 
     filename = "ap10k-{}-split{}.json".format(split, split_id)
     if ann_file is not None:
-        annotation_path = Path(ann_file)
+        annotation_path = resolve_input_file(ann_file, "--ann-file")
     elif all_species:
         annotation_path = data_root / "annotations" / filename
     else:
@@ -65,8 +69,8 @@ def evaluation_paths(data_root, species, split, split_id, ann_file=None):
             raise ValueError("Annotation file not found: {}".format(annotation_path))
         if split == "test":
             raise ValueError(
-                "Species test annotations not found: {}. Step 1 creates only "
-                "train/val subsets. To reproduce the complete test benchmark, "
+                "Species test annotations not found: {}. prepare_species.py creates "
+                "only train/val subsets. To reproduce the complete test benchmark, "
                 "use --species all --split test.".format(annotation_path)
             )
         raise ValueError(
@@ -108,19 +112,22 @@ def main():
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT,
-                        help="AP-10K folder; default: bridge/data/ap10k")
+                        help="AP-10K folder; default: bridge/data/ap-10k")
     parser.add_argument("--species", default=DEFAULT_SPECIES,
                         help="One species, or all; default: dog")
     parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--split-id", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--ann-file", help="Optional prefiltered annotation file")
     parser.add_argument("--out-dir", help="Output folder; relative to the project root")
+    add_device_argument(parser)
+    parser.add_argument("--threads", type=int, default=1)
     args = parser.parse_args()
 
     try:
         config_path = resolve_input_file(args.config, "--config")
         checkpoint_path = resolve_input_file(args.checkpoint, "--checkpoint")
-    except FileNotFoundError as error:
+        device = resolve_device(args.device)
+    except (FileNotFoundError, ValueError) as error:
         parser.error(str(error))
 
     import mmcv
@@ -129,8 +136,11 @@ def main():
     from mmcv.parallel import scatter
     from mmpose.datasets import build_dataset, build_dataloader
 
+    if args.threads <= 0:
+        parser.error("threads must be positive")
+    torch.set_num_threads(args.threads)
     cfg = Config.fromfile(str(config_path))
-    data_root = Path(args.data_root)
+    data_root = resolve_data_root(args.data_root)
     try:
         annotation_path, image_root, slug = evaluation_paths(
             data_root, args.species, args.split, args.split_id, args.ann_file,
@@ -146,11 +156,11 @@ def main():
         parser.error("No usable labeled animals remain after dataset filtering")
     loader = build_dataloader(
         dataset, samples_per_gpu=1, workers_per_gpu=0,
-        dist=False, shuffle=False,
+        dist=False, shuffle=False, pin_memory=device.type == "cuda",
     )
-    model = load_pose_model(cfg, checkpoint_path)
-    output_dir = Path(args.out_dir) if args.out_dir else (
-        DEFAULT_OUTPUT_ROOT / "{}_baseline_cpu".format(slug)
+    model = load_pose_model(cfg, checkpoint_path, device)
+    output_dir = resolve_project_path(args.out_dir) if args.out_dir else (
+        DEFAULT_OUTPUT_ROOT / "{}_baseline_{}".format(slug, device.type)
         / "{}_split{}".format(args.split, args.split_id)
     )
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -158,13 +168,14 @@ def main():
         args.species, args.split, args.split_id, len(dataset)), flush=True)
     print("Annotations:", annotation_path, flush=True)
     print("Checkpoint:", checkpoint_path, flush=True)
+    print("Device:", device, flush=True)
     print("Output:", output_dir, flush=True)
 
     outputs = []
     progress = mmcv.ProgressBar(len(dataset))
     with torch.no_grad():
         for batch in loader:
-            batch = scatter(batch, [-1])[0]
+            batch = scatter(batch, [-1 if device.type == "cpu" else device.index])[0]
             outputs.append(model(return_loss=False, **batch))
             progress.update()
 
@@ -177,7 +188,7 @@ def main():
         "species": args.species, "split": args.split, "split_id": args.split_id,
         "config": str(config_path), "checkpoint": str(checkpoint_path),
         "annotations": str(annotation_path), "image_root": str(image_root),
-        "num_animals": len(dataset), "metrics": metrics,
+        "num_animals": len(dataset), "device": str(device), "metrics": metrics,
     }
     with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2)

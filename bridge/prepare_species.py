@@ -7,7 +7,7 @@ Run from the project root:
     python bridge/prepare_species.py
 
 The default species is dog. Use --species to select another species.
-The default data root is bridge/data/ap10k.
+The default data root is bridge/data/ap-10k.
 
 The data root must contain annotations/ and data/. The script keeps the
 official train/validation split, original IDs, keypoints, and category metadata.
@@ -26,9 +26,9 @@ from pathlib import Path
 import re
 
 if __package__:
-    from .bridge_paths import DEFAULT_DATA_ROOT, DEFAULT_SPECIES
+    from .bridge_paths import DEFAULT_DATA_ROOT, DEFAULT_SPECIES, resolve_data_root
 else:
-    from bridge_paths import DEFAULT_DATA_ROOT, DEFAULT_SPECIES
+    from bridge_paths import DEFAULT_DATA_ROOT, DEFAULT_SPECIES, resolve_data_root
 
 
 def read_annotations(path):
@@ -86,7 +86,7 @@ def check_images(dataset, image_root):
 
 
 def prepare(args):
-    data_root = Path(args.data_root)
+    data_root = resolve_data_root(args.data_root)
     source_paths = {
         split: data_root / "annotations" / "ap10k-{}-split{}.json".format(
             split, args.split

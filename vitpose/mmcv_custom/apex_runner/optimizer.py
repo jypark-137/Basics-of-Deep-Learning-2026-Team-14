@@ -1,8 +1,8 @@
 from mmcv.runner import OptimizerHook, HOOKS
 try:
     import apex
-except:
-    print('apex is not installed')
+except ImportError:
+    apex = None
 
 
 @HOOKS.register_module()
@@ -10,6 +10,10 @@ class DistOptimizerHook_custom(OptimizerHook):
     """Optimizer hook for distributed training."""
 
     def __init__(self, update_interval=1, grad_clip=None, coalesce=True, bucket_size_mb=-1, use_fp16=False):
+        if use_fp16 and apex is None:
+            raise ImportError(
+                'use_fp16=True requires NVIDIA Apex. Set use_fp16=False '
+                'to train without Apex.')
         self.grad_clip = grad_clip
         self.coalesce = coalesce
         self.bucket_size_mb = bucket_size_mb

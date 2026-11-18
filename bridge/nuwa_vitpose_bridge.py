@@ -8,14 +8,13 @@ project root:
 The defaults use the same AP-10K config and split checkpoint as check_split.py.
 Configs use vitpose/configs/. The checkpoint is bridge/checkpoints/split/ap10k.pth.
 Override them with --config and --checkpoint if needed. No dataset is needed.
-Local mmpose imports are set up by bridge_paths.py; an editable installation
-is optional. Keep your existing third-party dependencies installed.
+Keep your existing third-party dependencies installed.
 
 This module provides only model access and the existing pose loss. It does NOT
 implement or change NuWa's masks, STE, neuron selection, SVD, or compensation.
 It does not train, prune, save, or overwrite a checkpoint.
 
-For subsequent steps:
+Usage with NuWa:
 
     backbone = get_nuwa_backbone(pose_model)
     # NuWa's block operations use backbone.blocks, not pose_model.blocks.
@@ -29,9 +28,9 @@ runnable on AP-10K.
 import argparse
 
 if __package__:
-    from .bridge_paths import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, resolve_input_file
+    from .bridge_paths import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, add_device_argument, resolve_device, resolve_input_file
 else:
-    from bridge_paths import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, resolve_input_file
+    from bridge_paths import DEFAULT_CHECKPOINT, DEFAULT_CONFIG, add_device_argument, resolve_device, resolve_input_file
 
 import torch
 from torch import nn
@@ -123,22 +122,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--device", default="cpu", help="cpu or cuda:0")
+    add_device_argument(parser)
+    parser.add_argument("--threads", type=int, default=1)
     args = parser.parse_args()
     try:
         config_path = resolve_input_file(args.config, "--config")
         checkpoint_path = resolve_input_file(args.checkpoint, "--checkpoint")
-    except FileNotFoundError as error:
+        device = resolve_device(args.device)
+    except (FileNotFoundError, ValueError) as error:
         parser.error(str(error))
 
     # Use the already installed ViTPose environment. No NuWa-only dependencies
-    # (such as MMDetection, Transformers or wandb) are imported in this step.
+    # (such as MMDetection, Transformers or wandb) are imported here.
     from mmcv import Config
     from mmpose.models import build_posenet
 
-    device = torch.device(args.device)
-    if device.type == "cuda" and not torch.cuda.is_available():
-        parser.error("CUDA is unavailable; run with --device cpu")
+    if args.threads <= 0:
+        parser.error("threads must be positive")
+    torch.set_num_threads(args.threads)
     torch.manual_seed(0)
     cfg = Config.fromfile(str(config_path))
     model = build_posenet(cfg.model).to(device)
@@ -147,6 +148,7 @@ def main():
     model.load_state_dict(state_dict, strict=True)
     del checkpoint, state_dict
     model.eval()
+    print("Device:", device)
     print("Checkpoint loaded successfully")
 
     # Freeze parameters for this diagnostic. Gradients will be checked through
@@ -197,7 +199,7 @@ def main():
     if any(parameter.grad is not None for parameter in model.parameters()):
         raise RuntimeError("An original model parameter unexpectedly received a gradient")
     print("Pose loss and backward pass: PASS")
-    print("Step 2 connection check passed")
+    print("Connection check passed")
 
 
 if __name__ == "__main__":

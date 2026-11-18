@@ -1,43 +1,28 @@
-"""Shared defaults for scripts run from the project root.
-
-Layout: vitpose/ and bridge/ are siblings.
-Checkpoints, data and work_dirs are inside bridge/.
-"""
+"""Use the project's shared paths while keeping legacy bridge output folders."""
 
 from pathlib import Path
 import sys
 
 
-PROJECT_ROOT = Path(".")
-VITPOSE_ROOT = Path("vitpose")
-BRIDGE_ROOT = Path("bridge")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-DEFAULT_SPECIES = "dog"
-DEFAULT_CONFIG = (
-    "vitpose/configs/animal/2d_kpt_sview_rgb_img/"
-    "topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py"
+from nuwa.paths import (
+    BRIDGE_ROOT, DEFAULT_CHECKPOINT, DEFAULT_CONFIG, DEFAULT_DATA_ROOT,
+    DEFAULT_SPECIES, VITPOSE_ROOT, resolve_data_root, resolve_input_file,
+    resolve_project_path,
 )
-DEFAULT_CHECKPOINT = "bridge/checkpoints/split/ap10k.pth"
-DEFAULT_DATA_ROOT = "bridge/data/ap-10k"
+from device_utils import add_device_argument, resolve_device
+
 DEFAULT_OUTPUT_ROOT = BRIDGE_ROOT / "work_dirs"
 
-
-if not (VITPOSE_ROOT / "mmpose").is_dir():
-    raise RuntimeError(
-        "Run commands from the project root containing vitpose/ and bridge/."
-    )
-
-if str(VITPOSE_ROOT) in sys.path:
-    sys.path.remove(str(VITPOSE_ROOT))
-sys.path.insert(0, str(VITPOSE_ROOT))
-
-
-def resolve_input_file(value, option):
-    """Check one configured file."""
-    path = Path(value)
-    if not path.is_file():
-        raise FileNotFoundError("File not found for {}: {}".format(option, path))
-    return path
+__all__ = [
+    "PROJECT_ROOT", "VITPOSE_ROOT", "BRIDGE_ROOT", "DEFAULT_SPECIES",
+    "DEFAULT_CONFIG", "DEFAULT_CHECKPOINT", "DEFAULT_DATA_ROOT", "DEFAULT_OUTPUT_ROOT",
+    "resolve_project_path", "resolve_data_root", "resolve_input_file",
+    "add_device_argument", "resolve_device",
+]
 
 
 if __name__ == "__main__":

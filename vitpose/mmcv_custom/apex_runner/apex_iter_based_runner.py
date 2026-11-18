@@ -12,8 +12,8 @@ from .checkpoint import save_checkpoint
 
 try:
     import apex
-except:
-    print('apex is not installed')
+except ImportError:
+    apex = None
 
 
 @RUNNERS.register_module()
@@ -97,6 +97,9 @@ class IterBasedRunnerAmp(IterBasedRunner):
                     f'but got {type(self.optimizer)}')
 
         if 'amp' in checkpoint:
+            if apex is None:
+                raise ImportError(
+                    'Restoring Apex AMP checkpoint state requires NVIDIA Apex.')
             apex.amp.load_state_dict(checkpoint['amp'])
             self.logger.info('load amp state dict')
 

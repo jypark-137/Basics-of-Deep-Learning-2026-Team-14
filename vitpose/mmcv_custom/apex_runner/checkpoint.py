@@ -12,8 +12,8 @@ from mmcv.runner.checkpoint import weights_to_cpu, get_state_dict
 
 try:
     import apex
-except:
-    print('apex is not installed')
+except ImportError:
+    apex = None
 
 
 def save_checkpoint(model, filename, optimizer=None, meta=None):
@@ -29,6 +29,8 @@ def save_checkpoint(model, filename, optimizer=None, meta=None):
         optimizer (:obj:`Optimizer`, optional): Optimizer to be saved.
         meta (dict, optional): Metadata to be saved in checkpoint.
     """
+    if apex is None:
+        raise ImportError('Saving Apex AMP checkpoints requires NVIDIA Apex.')
     if meta is None:
         meta = {}
     elif not isinstance(meta, dict):
