@@ -20,7 +20,7 @@ python -c "import sys; print(sys.executable)"
 ```
 
 The server environment named `dk14_sjk_torch` is described in
-[README.md](README.md). Activate that environment inside your allocated GPU
+[WORKFLOW.md](WORKFLOW.md). Activate that environment inside your allocated GPU
 session and run the verification commands before changing packages. Use a
 separate environment for the fresh installation recipes below.
 
@@ -70,7 +70,7 @@ python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA runti
 
 ### Obtain access to the GPU
 
-On the server described in [README.md](README.md), request the GPU session
+On the server described in [WORKFLOW.md](WORKFLOW.md), request the GPU session
 using the site's allocation command before running Python:
 
 ```bash
@@ -301,7 +301,7 @@ python main.py evaluate --checkpoint outputs/dog_full/ofp/edge.pth
 
 Checkpoints can move between CPU and GPU. Start a new comparison output
 directory after changing hardware; benchmark resume checks include the
-device and environment. See [nuwa/README.md](nuwa/README.md) for individual
+device and environment. See [README.md](README.md) for individual
 stages, model reuse, profiling, ablation, and resume options.
 
 ## Troubleshooting
