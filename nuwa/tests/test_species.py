@@ -12,6 +12,7 @@ import unittest
 import main
 from ..data.prepare_species import prepare
 from ..dataset.utils import evaluation_paths, validate_subsets
+from ..model.utils import pose_config
 from ..species import category_ids, normalize_species, species_slug
 from ..utils.pose_results import validate_provenance
 
@@ -23,6 +24,14 @@ class SpeciesChecks(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / "annotations").mkdir()
         (self.root / "data").mkdir()
+        self.base_config = self.root / "base_config.py"
+        self.base_config.write_text(
+            "model = dict(backbone=dict(depth=12, width=384))\n"
+            "data = dict(train=dict(pipeline=['train']), val=dict(pipeline=['val']))\n",
+            encoding="utf-8")
+        self.config = self.root / "source_config.py"
+        self.config.write_text("_base_ = 'base_config.py'\nmodel = dict(backbone=dict(depth=2))\n",
+                               encoding="utf-8")
         self.sources = {}
         for offset, split in ((0, "train"), (100, "val")):
             categories = [{"id": 8, "name": "dog"}, {"id": 24, "name": "cat"},
@@ -43,9 +52,62 @@ class SpeciesChecks(unittest.TestCase):
         path = self.root / "annotations" / ("ap10k-{}-split1.json".format(split))
         path.write_text(json.dumps(data), encoding="utf-8")
 
+    def options(self, species):
+        return SimpleNamespace(
+            data_root=self.root, split=1, list=False, species=species, config=self.config,
+            out_config=self.root / "prepared" / species_slug(species) / "config.py")
+
     def prepare(self, species):
         with redirect_stdout(io.StringIO()):
-            return prepare(SimpleNamespace(data_root=self.root, split=1, list=False, species=species))
+            return prepare(self.options(species))
+
+    def test_cli_writes_ready_to_use_config_without_manual_code(self):
+        args = self.options(["cat", "dog"])
+        original = {path: path.read_bytes() for path in (self.config, self.base_config)}
+        output = io.StringIO()
+        with redirect_stdout(output):
+            paths = main.main([
+                "prepare", "--species", "dog", "cat", "--data-root", str(self.root),
+                "--config", str(self.config), "--out-config", str(args.out_config)])
+        cfg = pose_config(args.out_config)
+        self.assertEqual(cfg.model.backbone.depth, 2)
+        self.assertEqual(cfg.model.backbone.width, 384)
+        for part in ("train", "val"):
+            self.assertEqual(Path(cfg.data[part].ann_file), paths[part])
+            self.assertEqual(Path(cfg.data[part].img_prefix), self.root / "data")
+            self.assertEqual(cfg.data[part].test_mode, part == "val")
+            self.assertEqual(cfg.data[part].pipeline, [part])
+        for path, content in original.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertNotIn("_base_", args.out_config.read_text(encoding="utf-8"))
+        self.assertIn("Prepared config:", output.getvalue())
+        self.assertNotIn("cfg.data.", output.getvalue())
+
+    def test_list_does_not_load_config_or_write_outputs(self):
+        args = self.options("dog")
+        args.list = True
+        args.config = self.root / "does_not_exist.py"
+        with redirect_stdout(io.StringIO()):
+            self.assertIsNone(prepare(args))
+        self.assertFalse((self.root / "prepared").exists())
+        self.assertFalse((self.root / "annotations/species").exists())
+
+    def test_invalid_config_is_rejected_before_writing_subsets(self):
+        args = self.options("dog")
+        args.config = self.root / "does_not_exist.py"
+        with self.assertRaises(FileNotFoundError):
+            prepare(args)
+        self.assertFalse(args.out_config.exists())
+        self.assertFalse((self.root / "annotations/species").exists())
+
+    def test_prepared_config_cannot_overwrite_source(self):
+        args = self.options("dog")
+        args.out_config = self.config
+        original = self.config.read_bytes()
+        with self.assertRaisesRegex(ValueError, "must differ"):
+            prepare(args)
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertFalse((self.root / "annotations/species").exists())
 
     def test_normalization_and_group_paths(self):
         self.assertEqual(normalize_species(" DOG "), ["dog"])
@@ -116,6 +178,9 @@ class SpeciesChecks(unittest.TestCase):
         self.assertEqual(validate_subsets(self.root, "all", 1)[2], [8, 10, 24, 51])
         for part, path in paths.items():
             self.assertEqual(path.read_bytes(), before[part])
+        cfg = pose_config(self.options("all").out_config)
+        self.assertEqual(Path(cfg.data.train.ann_file), paths["train"])
+        self.assertEqual(Path(cfg.data.val.ann_file), paths["val"])
         self.assertFalse((self.root / "annotations/species/all").exists())
 
     def test_custom_evaluation_annotations_check_the_complete_selection(self):

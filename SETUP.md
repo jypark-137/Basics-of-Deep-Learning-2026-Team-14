@@ -1,49 +1,31 @@
-# Project setup: CPU and NVIDIA GPU
+# Setup
 
-These instructions target 64-bit Windows and Linux on x86-64. Run commands
-from the project root, which contains `main.py`, `nuwa/`, `vitpose/`, and
-`bridge/`. Commands below work in PowerShell and Bash unless marked otherwise.
+Use this guide to get from a fresh environment to a working smoke test on
+64-bit Windows or Linux x86-64. Run project commands from the folder containing
+`main.py`. Installation commands below work in PowerShell and Bash.
 
-NuWa runs directly from this checkout. It loads the bundled
-`vitpose/mmpose` and `vitpose/mmcv_custom` source automatically; keep the local
-ViTPose checkout and configs with the project. Install the third-party
-dependencies described below.
+If you already have a working environment, activate it and continue with
+[2. Verify the environment](#2-verify-the-environment).
 
-## Choose an environment
+## 1. Install dependencies
 
-If the existing environment is working, activate it and continue
-with [data and checkpoint setup](#data-and-checkpoint-setup):
+This checkout uses the legacy ViTPose/MMPose APIs. Use the pinned versions below
+for a fresh installation, and choose **one** PyTorch/MMCV build: CPU or CUDA.
 
-```console
-conda activate [ENVIRONMENT_NAME]
-python -c "import sys; print(sys.executable)"
-```
-
-The server environment named `dk14_sjk_torch` is described in
-[WORKFLOW.md](WORKFLOW.md). Activate that environment inside your allocated GPU
-session and run the verification commands before changing packages. Use a
-separate environment for the fresh installation recipes below.
-
-This checkout uses the older MMPose/MMCV APIs. The reference versions are:
-
-| Component | Version / source |
+| Component | Version |
 | --- | --- |
 | Python | 3.9 |
-| PyTorch | 1.11.0, with the CPU or CUDA 11.3 build |
-| torchvision | 0.12.0, matching the PyTorch build |
-| MMCV distribution | `mmcv-full==1.4.8`, matching PyTorch and CPU/CUDA |
-| MMPose | 0.24.0, from this project's `vitpose/mmpose/` |
+| PyTorch / torchvision | 1.11.0 / 0.12.0 |
+| MMCV | `mmcv-full==1.4.8` |
+| MMPose | 0.24.0, bundled under `vitpose/mmpose/` |
 | NumPy / SciPy | 1.23.5 / 1.10.1 |
 | timm / einops | 0.4.9 / 0.6.1 |
-| OpenCV / xtcocotools | 4.8.1.78 / 1.14.3 |
 
-The bundled MMPose checks for MMCV versions from 1.3.8 through 1.5.0.
-MMCV 2.x and current MMPose releases use different APIs. These recipes pin
-the legacy stack rather than upgrading it.
+Keep the `vitpose/` source and configs in this checkout. NuWa finds the bundled
+MMPose automatically. The bundled code accepts MMCV 1.3.8 through 1.5.0;
+MMCV 2.x and MMPose 1.x use different APIs.
 
-## CPU environment
-
-Create a new environment and install the CPU builds:
+### CPU installation
 
 ```console
 conda create -n nuwa_cpu python=3.9 -y
@@ -53,45 +35,22 @@ python -m pip install "torch==1.11.0+cpu" "torchvision==0.12.0+cpu" --extra-inde
 python -m pip install "mmcv-full==1.4.8" --only-binary=mmcv-full --find-links https://download.openmmlab.com/mmcv/dist/cpu/torch1.11.0/index.html
 ```
 
-These PyTorch builds follow the
-[official PyTorch 1.11 installation instructions](https://pytorch.org/get-started/previous-versions/#v1110).
-The [CPU MMCV wheel index](https://download.openmmlab.com/mmcv/dist/cpu/torch1.11.0/index.html)
-contains Python 3.9 wheels for Windows and Linux x86-64.
+Continue with [shared dependencies](#shared-dependencies).
 
-Continue with [shared Python dependencies](#shared-python-dependencies).
-This environment needs no NVIDIA GPU, driver, or CUDA toolkit. CUDA
-availability should be `False`:
+### NVIDIA GPU installation
 
-```console
-python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA runtime:', torch.version.cuda); print('CUDA available:', torch.cuda.is_available())"
-```
-
-## GPU environment
-
-### Obtain access to the GPU
-
-On the server described in [WORKFLOW.md](WORKFLOW.md), request the GPU session
-using the site's allocation command before running Python:
-
-```bash
-ssai_agpu -g 1
-```
-
-On a workstation, use a terminal with access to the installed NVIDIA driver.
-Check the GPU visible in your session:
+Check GPU access in your terminal first:
 
 ```console
 nvidia-smi
-nvidia-smi -L
 ```
 
-Keep the scheduler's `CUDA_VISIBLE_DEVICES` setting. Device indices in this
-project refer to the GPUs visible to the Python process. A single allocated
-MIG device is normally selected as `cuda:0`.
+On a shared server, obtain your GPU allocation before running the check. Keep
+the scheduler's `CUDA_VISIBLE_DEVICES` setting; the first allocated GPU or MIG
+device is normally `cuda:0` inside that session. Site-specific server notes are
+in [WORKFLOW.md](WORKFLOW.md).
 
-### Install the CUDA build
-
-For a fresh environment:
+Install the CUDA 11.3 builds in a separate environment:
 
 ```console
 conda create -n nuwa_gpu python=3.9 -y
@@ -101,241 +60,150 @@ python -m pip install "torch==1.11.0+cu113" "torchvision==0.12.0+cu113" --extra-
 python -m pip install "mmcv-full==1.4.8" --only-binary=mmcv-full --find-links https://download.openmmlab.com/mmcv/dist/cu113/torch1.11.0/index.html
 ```
 
-The [PyTorch version guide](https://pytorch.org/get-started/previous-versions/#v1110)
-provides this CUDA 11.3 build, and the
-[matching MMCV wheel index](https://download.openmmlab.com/mmcv/dist/cu113/torch1.11.0/index.html)
-provides Python 3.9 binaries for Windows and Linux x86-64. The binary-only
-MMCV option avoids an unintended local C++/CUDA build.
+These recipes use the [official PyTorch 1.11 builds](https://pytorch.org/get-started/previous-versions/#v1110)
+and matching MMCV [CPU](https://download.openmmlab.com/mmcv/dist/cpu/torch1.11.0/index.html)
+or [CUDA 11.3](https://download.openmmlab.com/mmcv/dist/cu113/torch1.11.0/index.html)
+wheels. The CUDA wheels need a compatible NVIDIA driver; a separate CUDA
+toolkit or `nvcc` is not needed to use the prebuilt packages.
 
-The supplied server screenshot reports driver 535.104.05 and CUDA 12.2.
-That driver can run the older CUDA 11.3 binaries through
-[NVIDIA driver backward compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/latest/minor-version-compatibility.html).
-`torch.version.cuda` should report `11.3` for this recipe. Installing these
-prebuilt wheels does not require a separate CUDA toolkit or `nvcc`.
+### Shared dependencies
 
-Continue with [shared Python dependencies](#shared-python-dependencies), then
-verify CUDA explicitly:
+Run these in the environment you chose above:
 
 ```console
-python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA runtime:', torch.version.cuda); print('CUDA available:', torch.cuda.is_available()); assert torch.cuda.is_available(), 'CUDA is unavailable in this environment/session'"
-python -c "import torch; p = torch.cuda.get_device_properties(0); print('GPU:', p.name); print('Visible VRAM (GiB):', round(p.total_memory / 1024**3, 2))"
-```
-
-For the provided A100 MIG allocation, plan around approximately **9.5 GiB**
-and 14 SMs. The physical card's 80 GB is shared between MIG allocations.
-Start with the project's default batch size of **1**. After upgrading to a
-full GPU, rerun the CUDA probe and model check, then increase `--batch-size`
-for mask training or fine-tuning as memory permits. The code does not select
-devices by GPU model name.
-
-## Shared Python dependencies
-
-Run this after completing either the CPU or GPU installation above:
-
-```console
-python -m pip install "numpy==1.23.5" "scipy==1.10.1" "opencv-python==4.8.1.78" "Pillow==11.3.0" "matplotlib==3.9.4" "timm==0.4.9" "einops==0.6.1" "xtcocotools==1.14.3" "json-tricks==3.17.3" "munkres==1.1.4" "addict==2.4.0" "PyYAML==6.0.3" "yapf==0.43.0"
+python -m pip install "scipy==1.10.1" "Pillow==11.3.0" "matplotlib==3.9.4"
+python -m pip install "timm==0.4.9" "einops==0.6.1" "xtcocotools==1.14.3" "json-tricks==3.17.3" "munkres==1.1.4"
+python -m pip install "addict==2.4.0" "PyYAML==6.0.3" "yapf==0.43.0"
 python -m pip check
 ```
 
-NumPy is pinned for the older MMPose code and compiled evaluation package.
-The timm pin preserves the layer APIs used by this ViTPose checkout.
-The project uses its own config snapshot function, which works with the
-listed YAPF version.
+The `mmcv-full` distribution supplies the `mmcv` Python module. Keep one MMCV
+distribution installed; see the [MMCV installation guide](https://mmcv.readthedocs.io/en/v1.4.8/get_started/installation.html)
+for binary compatibility details. NumPy and timm are pinned for the bundled
+code. Apex is not required.
 
-The `mmcv-full` distribution provides the Python module named `mmcv`.
-Use one MMCV distribution in an environment; the upstream
-[MMCV installation guide](https://mmcv.readthedocs.io/en/v1.4.8/get_started/installation.html)
-explains the conflict when `mmcv` and `mmcv-full` are installed together.
+## 2. Verify the environment
 
-The current NuWa workflow uses FP32 on CPU and GPU. Apex is optional and is
-not required for these commands. TF32 is disabled during CUDA selection to
-preserve the masked/pruned model equivalence checks. NumPy SVD and
-least-squares calculations run on CPU; calibration features are stored on
-disk instead of retaining the complete calibration set in GPU memory.
+Check versions and confirm that Python uses the bundled MMPose:
 
-## Data and checkpoint setup
+```console
+python -c "import nuwa.paths, torch, mmcv, mmpose; print('torch:', torch.__version__); print('mmcv:', mmcv.__version__); print('mmpose:', mmpose.__version__); print(mmpose.__file__)"
+python main.py self-test
+```
 
-The dataset and model weights are excluded from Git. Copy the existing data
-and supplied split checkpoint into this layout, or select other locations
-with `--data-root` and `--checkpoint`:
+The MMPose path should end in this checkout's `vitpose/mmpose/__init__.py`.
+Self-test should finish with `Checks passed (...)`. It needs dependencies but
+no dataset or pretrained checkpoint. Add `--verbose` for detailed output.
+
+For a GPU environment, also confirm that PyTorch can see CUDA:
+
+```console
+python -c "import torch; print('CUDA runtime:', torch.version.cuda); print('CUDA available:', torch.cuda.is_available()); assert torch.cuda.is_available(), 'CUDA is unavailable in this environment/session'"
+```
+
+For the GPU recipe, expect runtime `11.3` and availability `True`. A CPU
+installation should report availability `False`.
+
+## 3. Add the dataset and checkpoint
+
+Data and pretrained weights are excluded from Git. Arrange them as follows:
 
 ```text
 project-root/
   main.py
-  device_utils.py
   nuwa/
-  vitpose/
-    mmpose/
-    mmcv_custom/
-    configs/
-  bridge/
+  vitpose/                       # bundled code and model configs
   checkpoints/
-    vitpose-plus-small.pth         # source checkpoint, if conversion is needed
     split/
-      ap10k.pth
+      ap10k.pth                  # pretrained AP-10K ViTPose-S weights
   data/
     ap-10k/
       annotations/
         ap10k-train-split1.json
         ap10k-val-split1.json
-        ap10k-test-split1.json     # needed only for test-set evaluation
+        ap10k-test-split1.json    # only needed for test-set evaluation
       data/
-        <images at the paths in the annotations' file_name fields>
-  outputs/                       # generated models, masks, logs and results
+        ...                      # images, matching annotation file_name paths
+  outputs/                       # created by project commands
 ```
 
-Obtain AP-10K using the
-[official dataset instructions](https://github.com/AlexTheBad/AP-10K).
-Preserve its annotation IDs and train/validation/test splits. Split 1 is the
-default; use the corresponding annotation files when selecting split 2 or 3.
+### Dataset
 
-The default checkpoint is the **ordinary, split AP-10K ViTPose-S** model:
-384 embedding dimensions, 12 transformer blocks, 12 attention heads, and
-17 keypoint channels. Its config is:
+Get the images and annotations from the [official AP-10K repository](https://github.com/AlexTheBad/AP-10K#download).
+Preserve the original IDs and official splits. Split 1 is the default; include
+the corresponding annotation files when using split 2 or 3.
 
-```text
-vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py
-```
+For another dataset location, pass `--data-root path/to/ap-10k` to both
+`prepare` and subsequent model commands.
 
-Use the supplied `ap10k.pth`. If obtaining another checkpoint from
-[upstream ViTPose](https://github.com/ViTAE-Transformer/ViTPose), ensure it has
-the same ordinary architecture and AP-10K head. A raw ViTPose++ multi-expert
-checkpoint or a ViTPose-B checkpoint requires the appropriate conversion or
-config before it can be loaded by this default setup.
+### Checkpoint
 
-To split the supplied ViTPose++ source checkpoint, run:
+Use the supplied `checkpoints/split/ap10k.pth` with the
+[default ViTPose-S AP-10K config](vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py).
+The model has 384 embedding dimensions, 12 transformer blocks, 12 attention
+heads and 17 keypoint channels. Other checkpoints need a matching `--config`.
+
+If you have the supplied multi-task source checkpoint instead, place it at
+`checkpoints/vitpose-plus-small.pth` and split it:
 
 ```console
 python vitpose/tools/model_split.py
 ```
 
-The splitter reads `checkpoints/vitpose-plus-small.pth` and writes the task
-checkpoints, including `ap10k.pth`, into `checkpoints/split/`. It creates the
-output directory when needed. Use `--source` and `--target` to select other
-paths; relative paths are resolved from the project root.
+This writes the task checkpoints, including `ap10k.pth`, into
+`checkpoints/split/`. The splitter also accepts `--source` and `--target`.
 
-Relative config, checkpoint, annotation, data and output paths are resolved
-from the project root. Absolute paths are also accepted. Outputs default to
-`outputs/`.
+Relative file paths are resolved from the project root. Absolute paths work
+too. Generated models, logs, configs and reports go under `outputs/` by default;
+source weights stay in `checkpoints/` and prepared annotations in `data/`.
 
-This output folder collects evaluation predictions/metrics, training logs,
-learned masks, generated model checkpoints, calibration scores, and profiling
-and comparison reports. Pretrained source/split weights stay in `checkpoints/`;
-dataset files and prepared species annotations stay in `data/`.
-
-## Verify the installation
-
-First check the active environment and bundled source imports:
+## 4. Check the model and prepare a species
 
 ```console
-python -c "import nuwa.paths; import mmcv, mmpose, torch; print('torch:', torch.__version__); print('mmcv:', mmcv.__version__); print('mmpose:', mmpose.__version__); print('source:', mmpose.__file__)"
-python main.py --help
-python main.py self-test
-```
-
-The MMPose source path should end in this checkout's
-`vitpose/mmpose/__init__.py`. Self-tests need the dependencies and code, but
-do not need the AP-10K dataset or pretrained checkpoint.
-
-After placing the checkpoint, check model loading, finite 17-joint heatmaps,
-and gradients on your chosen device:
-
-```console
-python main.py check-model --device cpu
-```
-
-In a GPU environment, also run:
-
-```console
-python main.py check-model --device cuda:0
-```
-
-The explicit CUDA selection reports an error if the GPU cannot be used.
-Ordinary model commands default to `--device auto`, which selects the first
-visible CUDA device or falls back to CPU. Other supported selections are
-`--device cpu`, `--device cuda`, and `--device cuda:N`.
-
-Prepare the default dog subset using the existing train/validation files:
-
-```console
-python main.py prepare --list
+python main.py check-model
 python main.py prepare --species dog
 ```
 
-Species preparation writes filtered annotation files under
-`data/ap-10k/annotations/species/dog/` and reuses the original images.
+Model commands select CUDA when available and otherwise use CPU. Add
+`--device cpu` to force CPU execution, or `--device cuda:0` to require the first
+visible GPU. An unavailable explicit CUDA selection produces an error.
 
-For one model covering several species, prepare their union and use the same
-list for derivation:
+Preparation creates dog train/validation annotations under
+`data/ap-10k/annotations/species/dog/` and a config with paths already applied at
+`outputs/nuwa_prepare/dog/split1/config.py`. No Python assignments need to be
+copied. Use `python main.py prepare --list` to see other species.
 
-```console
-python main.py prepare --species dog cat
-python main.py derive --species dog cat --pruning-rate 0.4 --smoke-test --out-dir outputs/cat_dog_smoke
-python main.py evaluate --checkpoint outputs/cat_dog_smoke/ofp/edge.pth
-```
-
-The combined subset is stored under `annotations/species/cat__dog/` inside
-the data root. Ordering and capitalization do not change the selection.
-Quote multiword names, for example `--species cat "brown bear"`. Use
-`--species all` for the complete official train/validation annotations.
-Evaluation and later model stages can inherit the selected species list
-from the checkpoint. Single-species commands and older checkpoints are
-also supported.
-
-### CPU smoke run
+## 5. Run a smoke test
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --device cpu --smoke-test --out-dir outputs/dog_cpu_smoke
+python main.py derive --species dog --pruning-rate 0.4 --smoke-test --out-dir outputs/dog_smoke
 ```
 
-### GPU smoke run
+This performs ten mask updates, prunes using two training crops, verifies model
+reloads, and runs a short comparison. AP evaluation is skipped. Choose a fresh
+output folder if you repeat the test.
 
-```console
-python main.py derive --species dog --pruning-rate 0.4 --device cuda:0 --smoke-test --out-dir outputs/dog_gpu_smoke
-```
+Training batch size defaults to 1. Start there, especially on a MIG allocation;
+increase `--batch-size` for mask learning or fine-tuning only as memory permits.
+Calibration and evaluation use one crop at a time.
 
-Each smoke run performs ten mask updates, anchor export, OFP using two
-training crops, checkpoint reload checks, and comparison. AP is skipped.
-Add `--retrain` to include ten fine-tuning updates in the smoke check. Use a
-new output directory for each fresh run.
-
-After a successful smoke run, start a full run in another directory. This
-command uses CUDA automatically when available:
-
-```console
-python main.py derive --species dog --pruning-rate 0.4 --out-dir outputs/dog_full
-```
-
-Add `--device cpu` for a full CPU run. Full runs default to 10,000 mask
-updates and include validation AP and final comparison. Optional weight
-fine-tuning is enabled with `--retrain --finetune-steps 1000`.
-
-To evaluate a generated model:
-
-```console
-python main.py evaluate --checkpoint outputs/dog_full/ofp/edge.pth
-```
-
-Checkpoints can move between CPU and GPU. Start a new comparison output
-directory after changing hardware; benchmark resume checks include the
-device and environment. See [README.md](README.md) for individual
-stages, model reuse, profiling, ablation, and resume options.
+After the smoke test succeeds, follow [Run the full experiment](README.md#3-run-the-full-experiment)
+in the README. It also covers multiple species, custom paths, saved models,
+comparison and resume options.
 
 ## Troubleshooting
 
-| Symptom | Check / action |
-| --- | --- |
-| `torch.cuda.is_available()` is `False` | Check `nvidia-smi` inside the allocated session, the active Python environment, and that PyTorch has the `+cu113` build. Preserve the scheduler's GPU visibility setting. CPU execution remains available through `--device cpu`. |
-| `No matching distribution` for MMCV | Confirm Python 3.9, 64-bit Windows/Linux x86-64, and the CPU or `cu113` wheel index matching your PyTorch build. |
-| `mmcv._ext`, DLL, or undefined-symbol error | Check the PyTorch/MMCV binary pairing and whether both MMCV distributions were installed. Recreate the separate environment with one matching `mmcv-full` wheel. |
-| NumPy binary/ABI error from `xtcocotools` | Check that NumPy is 1.23.5 and xtcocotools is 1.14.3 in the selected environment; reinstall their matching wheels there. |
-| `libGL.so.1` or `libgthread-2.0.so.0` missing on Linux | Install the OpenCV system libraries; on Debian/Ubuntu these are `libgl1` and `libglib2.0-0`. A headless alternative is to replace `opencv-python` with `opencv-python-headless==4.8.1.78`. Keep one OpenCV distribution. |
-| Dataset/subset not found | Check the `data/ap-10k/annotations/` and `data/` layout, or supply `--data-root` consistently to preparation and model commands. Run species preparation before derivation. |
-| Missing/unexpected checkpoint keys or size mismatch | Check that the ordinary ViTPose-S config and split AP-10K checkpoint match. SKP mask-only files must first be exported as `anchor.pth`. |
-| CUDA out of memory | Keep training batch size at 1 on the MIG allocation, check other GPU processes, and use the small config. The project also supports explicit CPU execution. |
-| Output directory already exists | Choose another `--out-dir`, or use the documented `--resume` option with matching settings and completed stages. |
+Add `--verbose` to the failing command for diagnostic details.
 
-The fresh CPU/CUDA installation recipes use published matching wheel
-indexes; they were not installed into new environments while writing this
-guide. Run the checks above on the actual A100 MIG or replacement GPU before
-starting a full experiment.
+| Problem | What to check |
+| --- | --- |
+| Python uses the wrong environment | Run `python -c "import sys; print(sys.executable)"` and activate the intended conda environment. |
+| CUDA is unavailable | Check `nvidia-smi` inside your allocated session and verify the `+cu113` PyTorch build. Preserve the scheduler's GPU visibility setting. Use `--device cpu` for CPU execution. |
+| No matching MMCV wheel | Use Python 3.9 on Windows/Linux x86-64 and the CPU or CUDA wheel index matching your PyTorch build. |
+| `mmcv._ext`, DLL or undefined-symbol error | Check the PyTorch/MMCV pairing and that only one MMCV distribution is installed. Recreate the environment with the matching wheel if needed. |
+| NumPy ABI error from `xtcocotools` | Check NumPy 1.23.5 and xtcocotools 1.14.3; reinstall matching wheels in the active environment. |
+| Missing `libGL.so.1` or `libgthread-2.0.so.0` on Linux | Install `libgl1` and `libglib2.0-0` on Debian/Ubuntu, or use `opencv-python-headless==4.8.1.78` in place of `opencv-python`. Keep one OpenCV distribution. |
+| Dataset or subset not found | Check the layout above, use the same `--data-root` throughout, and run `prepare` for the selected species and split. |
+| Checkpoint keys or tensor sizes do not match | Pair the checkpoint with its model config. Export mask-only files through `anchor` before using them as models. |
+| CUDA runs out of memory | Use batch size 1, check other GPU processes, and confirm the selected config fits the visible GPU allocation. |
+| Output folder already exists | Use a new `--out-dir` for a fresh run. See [Reuse work](README.md#reuse-work) for matching completed runs and interrupted stages. |

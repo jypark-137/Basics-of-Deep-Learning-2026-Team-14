@@ -1,4 +1,4 @@
-"""Prepare AP-10K species annotations while retaining official train/validation splits."""
+"""Prepare AP-10K species annotations and a config with dataset paths already applied."""
 
 
 import argparse
@@ -6,8 +6,12 @@ from collections import Counter
 import json
 from pathlib import Path
 from numbers import Integral
-from ..paths import DEFAULT_DATA_ROOT, DEFAULT_SPECIES, resolve_data_root
+from ..paths import (
+    DEFAULT_CONFIG, DEFAULT_DATA_ROOT, DEFAULT_OUTPUT_ROOT, DEFAULT_SPECIES,
+    resolve_data_root, resolve_input_file, resolve_project_path,
+)
 from ..species import add_species_argument, category_ids, normalize_species, species_slug
+from ..utils.console import CommandParser, command_output, detail, display_path
 
 def read_annotations(path):
     if not path.is_file():
@@ -64,6 +68,22 @@ def check_images(dataset, image_root):
         )
 
 
+def prepared_config(args, paths, data_root, slug):
+    """Resolve the source config before writing any prepared output."""
+    from ..dataset.utils import apply_data_paths
+    from ..model.utils import config_snapshot, pose_config
+
+    source = resolve_input_file(getattr(args, "config", DEFAULT_CONFIG), "--config")
+    destination = (resolve_project_path(args.out_config) if getattr(args, "out_config", None)
+                   else DEFAULT_OUTPUT_ROOT / "nuwa_prepare" / slug / "split{}".format(args.split) / "config.py")
+    if destination.suffix != ".py":
+        raise ValueError("--out-config must be a .py file")
+    if destination == source:
+        raise ValueError("--out-config must differ from the source --config")
+    cfg = apply_data_paths(pose_config(source), paths, data_root)
+    return destination, config_snapshot(cfg)
+
+
 def prepare(args):
     data_root = resolve_data_root(args.data_root)
     source_paths = {
@@ -94,8 +114,7 @@ def prepare(args):
             print("{:28s} {:13d} {:13d}".format(
                 name, counts["train"][category_id], counts["val"][category_id]
             ))
-        print("\nUse a species name exactly as shown (capitalization does not matter).")
-        print("Counts are animal annotations, before MMPose's normal validity filtering.")
+        detail("Counts are animal annotations before validity filtering.")
         return
 
     species = normalize_species(args.species)
@@ -118,39 +137,45 @@ def prepare(args):
     if train_files & val_files:
         raise ValueError("Train and validation contain overlapping image filenames")
 
-    if species == ["all"]:
-        print("All species use the existing official train/validation annotations.")
-        return source_paths
-    output_dir.mkdir(parents=True, exist_ok=True)
-    print("Species: {} (original category IDs: {})".format(", ".join(species), selected_ids))
-    for split, subset in subsets.items():
-        output_path = output_dir / source_paths[split].name
-        with output_path.open("w", encoding="utf-8") as handle:
-            json.dump(subset, handle, ensure_ascii=False)
-            handle.write("\n")
-        print("{}: {} images, {} animal annotations ({} labeled, non-crowd)".format(
-            split, len(subset["images"]), len(subset["annotations"]),
-            labeled_animals(subset)
-        ))
-        print("  {}".format(output_path))
+    paths = (source_paths if species == ["all"] else
+             {split: output_dir / path.name for split, path in source_paths.items()})
+    config_path, config_text = prepared_config(args, paths, data_root, slug)
 
-    print("\nPaths to use AFTER Config.fromfile(...):")
-    for split in ("train", "val"):
-        annotation_path = (output_dir / source_paths[split].name).as_posix()
-        image_prefix = (data_root / "data").as_posix() + "/"
-        print("cfg.data.{}.ann_file = {!r}".format(split, annotation_path))
-        print("cfg.data.{}.img_prefix = {!r}".format(split, image_prefix))
-    print("\nEvaluate cfg.data.val to record the unpruned species baseline AP.")
-    return {split: output_dir / path.name for split, path in source_paths.items()}
+    if species == ["all"]:
+        detail("Using the official train/validation annotations.")
+    else:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        detail("Original category IDs:", selected_ids)
+        for split, subset in subsets.items():
+            with paths[split].open("w", encoding="utf-8") as handle:
+                json.dump(subset, handle, ensure_ascii=False)
+                handle.write("\n")
+            detail("{}: {} images, {} animal annotations ({} labeled, non-crowd)".format(
+                split, len(subset["images"]), len(subset["annotations"]),
+                labeled_animals(subset)
+            ))
+            detail("  {}".format(paths[split]))
+
+    from ..utils.io import atomic_text
+    atomic_text(config_path, config_text)
+    print("Prepared {} (split {}): {} training animals, {} validation animals.".format(
+        ", ".join(species), args.split, labeled_animals(subsets["train"]), labeled_animals(subsets["val"])))
+    print("Annotations:", display_path(paths["train"].parent))
+    print("Prepared config:", display_path(config_path))
+    return paths
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = CommandParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT, type=Path,
                         help="AP-10K folder; default: data/ap-10k")
     parser.add_argument("--split", type=int, choices=(1, 2, 3), default=1,
                         help="Official split number; default: 1")
+    parser.add_argument("--config", default=DEFAULT_CONFIG,
+                        help="Source pose config for the prepared config")
+    parser.add_argument("--out-config",
+                        help="Prepared config path; default: outputs/nuwa_prepare/<species>/split<N>/config.py")
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--list", action="store_true",
                         help="List species and annotation counts, without writing files")
@@ -158,10 +183,11 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     parser = parser or get_args_parser()
     try:
-        prepare(args)
+        return prepare(args)
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(1, "Error: {}\n".format(error))
 

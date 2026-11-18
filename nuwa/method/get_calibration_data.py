@@ -20,6 +20,7 @@ from device_utils import resolve_device
 from ..utils.io import file_sha256
 from ..utils.utils import seed_all
 from ..species import normalize_species
+from ..utils.console import library_output
 
 def calibration_options(args):
     """Accept the current CLI names and NuWa's calibration_sample_num alias."""
@@ -93,7 +94,8 @@ def collect_training_features(cfg, model, args, species, split_id, token_counts,
         cfg.data.train.ann_file = str(annotation_path)
         cfg.data.train.img_prefix = str(image_root) + os.sep
         cfg.data.train.test_mode = False
-        dataset = build_dataset(cfg.data.train)
+        with library_output():
+            dataset = build_dataset(cfg.data.train)
         loader = build_dataloader(dataset, samples_per_gpu=1, workers_per_gpu=0,
                                   dist=False, shuffle=False, drop_last=False,
                                   pin_memory=torch.device(args.device).type == "cuda")
@@ -138,7 +140,7 @@ def collect_training_features(cfg, model, args, species, split_id, token_counts,
                 visits[block_id] += 1
 
             handles.append(block.mlp.act.register_forward_hook(capture))
-        print("Training pass: {} crops; calibration: {} random crops".format(count, samples), flush=True)
+        print("Collecting activations: {} training crops, {} calibration crops".format(count, samples), flush=True)
         for index, batch in enumerate(itertools.islice(loader, count)):
             context["index"] = index
             data = move_batch(batch, torch.device(args.device))
@@ -146,7 +148,7 @@ def collect_training_features(cfg, model, args, species, split_id, token_counts,
             if not torch.isfinite(heatmaps).all().item():
                 raise RuntimeError("Nonfinite heatmaps during calibration")
             if index == 0 or (index + 1) % 50 == 0 or index + 1 == count:
-                print("Activation pass {}/{}".format(index + 1, count), flush=True)
+                print("Activations {}/{}".format(index + 1, count), flush=True)
         if any(value != count for value in visits):
             raise RuntimeError("Not every block was visited once per training crop")
         if any(not np.isfinite(score).all() for score in scores):

@@ -9,10 +9,11 @@ from ..paths import DEFAULT_CHECKPOINT, DEFAULT_CONFIG
 from .utils import get_model, pose_config, pose_input
 from device_utils import add_device_argument, resolve_device
 from .vit import AttentionPruned, forward_heatmaps, get_nuwa_backbone, heatmap_task_loss, hidden_sizes
+from ..utils.console import CommandParser, command_output
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = CommandParser(description=__doc__)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     add_device_argument(parser)
@@ -20,6 +21,7 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     parser = parser or get_args_parser()
     if args.threads <= 0:
@@ -51,8 +53,7 @@ def run(args, parser=None):
         raise RuntimeError("A frozen model weight received a gradient")
     result = {"stage": info.get("stage"), "device": str(images.device), "heatmap_shape": list(expected),
               "hidden_sizes": hidden_sizes(model), "gradient_check": True}
-    print("Device:", images.device, flush=True)
-    print("Checkpoint, heatmaps, frozen weights and pose-loss gradient: PASS")
+    print("Model check passed ({}, heatmaps {}).".format(images.device, " x ".join(map(str, expected))))
     return result
 
 

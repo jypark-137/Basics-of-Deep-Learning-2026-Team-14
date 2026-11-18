@@ -28,6 +28,7 @@ from ..utils.utils import set_seed
 from .eval import evaluate
 from .utils import get_delta_acc, log_metrics, save_model
 from ..species import add_species_argument, normalize_species, species_slug
+from ..utils.console import CommandParser, command_output, display_path
 
 
 def train(args, model, train_loader, test_loader, model_name=None, early_stop=True, best=False):
@@ -121,7 +122,7 @@ claimed to be resumable; completed checkpoints can be used as new inputs.
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = CommandParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
@@ -142,6 +143,7 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     parser = parser or get_args_parser()
     if args.threads <= 0:
@@ -177,7 +179,9 @@ def run(args, parser=None):
               "best_val_ap": None if ap is None else ap / 100,
               "smoke_test": args.smoke_test, "reload_verification": verification}
     atomic_json(directory / "training_report.json", report)
-    print("Fine-tuned checkpoint:", selected, flush=True)
+    if args.smoke_test:
+        print("Smoke test: AP not evaluated.")
+    print("Fine-tuned model saved:", display_path(selected), flush=True)
     return report
 
 

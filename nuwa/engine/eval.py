@@ -16,6 +16,7 @@ from ..model.checkpoint import BASE_STAGE, load_pose_checkpoint
 from device_utils import add_device_argument, resolve_device
 from ..utils.io import atomic_json
 from ..species import add_species_argument, normalize_species
+from ..utils.console import CommandParser, command_output, detail, display_path, library_output
 
 @torch.no_grad()
 def evaluate_metrics(model, test_loader, device=None, output_dir=None, progress=True, save_predictions=True):
@@ -39,7 +40,8 @@ def evaluate_metrics(model, test_loader, device=None, output_dir=None, progress=
         directory.mkdir(parents=True, exist_ok=True)
         if output_dir is not None and save_predictions:
             mmcv.dump(outputs, str(directory / "predictions.pkl"))
-        metrics = test_loader.dataset.evaluate(outputs, res_folder=str(directory), metric="mAP")
+        with library_output():
+            metrics = test_loader.dataset.evaluate(outputs, res_folder=str(directory), metric="mAP")
         metrics = {name: float(value) for name, value in metrics.items()}
         if "AP" not in metrics or not math.isfinite(metrics["AP"]) or not 0 <= metrics["AP"] <= 1:
             raise RuntimeError("The pose evaluator returned an invalid AP")
@@ -71,7 +73,7 @@ def evaluate_ap(model, loader, device, output_dir):
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = CommandParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT,
                         help="Unpruned split weights, SKP anchor.pth, or OFP edge.pth")
@@ -87,6 +89,7 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     parser = parser or get_args_parser()
     if args.threads <= 0:
@@ -120,7 +123,8 @@ def run(args, parser=None):
     dataset_cfg = cfg.data[args.split]
     dataset_cfg.test_mode = True
     dataset_cfg.ann_file, dataset_cfg.img_prefix = str(annotation_path), str(image_root) + os.sep
-    dataset = build_dataset(dataset_cfg)
+    with library_output():
+        dataset = build_dataset(dataset_cfg)
     if len(dataset) == 0:
         parser.error("No usable labeled animals remain after dataset filtering")
     loader = build_dataloader(dataset, samples_per_gpu=1, workers_per_gpu=0,
@@ -129,9 +133,9 @@ def run(args, parser=None):
         DEFAULT_OUTPUT_ROOT / "nuwa_eval" / checkpoint_path.parent.name / checkpoint_path.stem
         / slug / "{}_split{}".format(args.split, split_id)
     )
-    print("Species: {} | Split: {} (split {}) | Animals: {}".format(
-        ", ".join(species), args.split, split_id, len(dataset)), flush=True)
-    print("Checkpoint:", checkpoint_path, "| Device:", device, flush=True)
+    print("Evaluating {}: {} animals | {} split {} | {}".format(
+        ", ".join(species), len(dataset), args.split, split_id, device), flush=True)
+    detail("Checkpoint:", checkpoint_path, flush=True)
     metrics = evaluate_metrics(model, loader, device, output_dir)
     report = {
         "checkpoint": str(checkpoint_path), "config": str(config_path),
@@ -148,12 +152,13 @@ def run(args, parser=None):
         "compute_profile": info.get("final_profile"),
     }
     atomic_json(output_dir / "metrics.json", report)
-    print("\nAP points: {:.2f}".format(100 * metrics["AP"]))
+    print("\nAP: {:.2f}".format(100 * metrics["AP"]))
+    detail("Metrics:", metrics)
     if args.split == "val" and split_id == info.get("split") and args.ann_file is None:
         for label, key in (("Saved masked", "source_mask_val_ap"), ("Unpruned baseline", "baseline_val_ap")):
             if report[key] is not None:
                 print("{} AP: {:.2f}".format(label, 100 * report[key]))
-    print("Results:", output_dir)
+    print("Results:", display_path(output_dir / "metrics.json"))
     return report
 
 

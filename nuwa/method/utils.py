@@ -7,10 +7,10 @@ import torch
 from ..paths import DEFAULT_OUTPUT_ROOT
 from ..utils.io import atomic_torch_save, file_sha256, frozen_state_sha256
 from ..species import normalize_species
+from .skp import TopKBinarizer, get_skp_parameters
 
 @torch.no_grad()
 def export_masks(model):
-    from .get_anchor_model import TopKBinarizer, get_skp_parameters
     masks, betas = get_skp_parameters(model)
     scores = [parameter.detach().cpu().clone() for parameter in masks]
     controls = [parameter.detach().cpu().clone() for parameter in betas]
@@ -33,7 +33,6 @@ def load_skp_masks(model, payload):
     Anchor export should use the saved binary_mlp_masks as authoritative for neuron
     indices: sorting tied scores can differ across devices.
     """
-    from .get_anchor_model import get_skp_parameters
     masks, betas = get_skp_parameters(model)
     saved_masks, saved_betas = payload["mlp_masks"], payload["mlp_betas"]
     if len(masks) != len(saved_masks) or len(betas) != len(saved_betas):

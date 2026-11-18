@@ -38,6 +38,9 @@ python main.py prepare --species cat dog
 Use `--species dog` for one species, or `--species all` for every species.
 Quote names containing spaces, for example `--species cat "brown bear"`.
 Preparation creates filtered annotations and reuses the original images.
+It also saves a config with the dataset paths already filled in under
+`outputs/nuwa_prepare/<species>/split1/config.py`. Continue with the commands
+below; no Python code needs to be copied or edited.
 
 ## Try a quick run
 
@@ -93,3 +96,4 @@ python main.py derive --help
 
 See [README.md](README.md) for individual stages, checkpoint reuse, profiling
 and ablation commands. See [WORKFLOW.md](WORKFLOW.md) for the research plan.
+Add `--verbose` to any command when you need detailed diagnostic output.

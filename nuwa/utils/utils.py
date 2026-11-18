@@ -24,6 +24,7 @@ from ..model.checkpoint import load_pose_checkpoint
 from ..dataset.utils import evaluation_paths, move_batch
 from .io import atomic_json, atomic_torch_save, state_size_bytes
 from ..species import normalize_species
+from .console import CommandParser, command_output, detail, display_path, library_output
 
 MAC_CONVENTION = (
     "One multiply-accumulate = one MAC; counts Linear, Conv2d, ConvTranspose2d, "
@@ -230,7 +231,8 @@ def _training_loader(args, cfg):
     dataset_cfg = copy.deepcopy(cfg.data.train)
     dataset_cfg.ann_file, dataset_cfg.img_prefix = str(path), str(image_root) + os.sep
     dataset_cfg.test_mode = False
-    dataset = build_dataset(dataset_cfg)
+    with library_output():
+        dataset = build_dataset(dataset_cfg)
     if len(dataset) == 0:
         raise ValueError("No usable training animals remain")
     return build_dataloader(dataset, samples_per_gpu=1, workers_per_gpu=0,
@@ -371,7 +373,7 @@ def less_is_more(args, model, test_loader, repeat_num=1000):
 
 def get_args_parser():
     from ..paths import DEFAULT_CHECKPOINT
-    parser = argparse.ArgumentParser(description="Profile full-pose matrix costs and heatmap-forward latency.")
+    parser = CommandParser(description="Profile full-pose matrix costs and heatmap-forward latency.")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     add_device_argument(parser)
@@ -383,6 +385,7 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     import json
     parser = parser or get_args_parser()
@@ -394,7 +397,13 @@ def run(args, parser=None):
     result = profiling(args, model, warm_steps=args.warmup, run_steps=args.repeats)
     if args.out:
         atomic_json(resolve_project_path(args.out), result)
-    print(json.dumps(result, indent=2))
+    print("Profile ({}) | {:.2f}M parameters | {:.3f} GMACs".format(
+        result["device"], result["#Params (M)"], result["GMACs"]))
+    print("Latency: {:.2f} ms median | {:.1f} images/s".format(
+        result["latency"]["median_ms"], result["throughput (image/s)"]))
+    if args.out:
+        print("Report:", display_path(resolve_project_path(args.out)))
+    detail(json.dumps(result, indent=2))
     return result
 
 

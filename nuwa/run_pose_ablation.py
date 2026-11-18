@@ -18,9 +18,10 @@ from device_utils import add_device_argument, device_info, resolve_device
 from .utils.io import atomic_json, file_sha256, fingerprint
 from .utils.pose_results import ABLATIONS, ablation_cases, validate_provenance
 from .species import add_species_argument, normalize_species
+from .utils.console import CommandParser, command_output, display_path, is_verbose
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = CommandParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--anchor", required=True)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
@@ -42,6 +43,7 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     parser = parser or get_args_parser()
     args.data_root = str(resolve_data_root(args.data_root))
@@ -152,6 +154,8 @@ def run(args, parser=None):
                 command.append("--skip-attention")
             if args.smoke_test:
                 command.append("--smoke-test")
+            if is_verbose():
+                command.append("--verbose")
             print("Building ablation:", label, flush=True)
             subprocess.run(command, env=environment, cwd=str(PROJECT_ROOT), check=True)
             if not edge.is_file() or not report_path.is_file():
@@ -170,8 +174,10 @@ def run(args, parser=None):
         command.append("--smoke-test")
     if args.resume:
         command.append("--resume")
+    if is_verbose():
+        command.append("--verbose")
     subprocess.run(command, env=environment, cwd=str(PROJECT_ROOT), check=True)
-    print("Study complete:", output_dir / "comparison/comparison.md")
+    print("Ablation results:", display_path(output_dir / "comparison/comparison.md"))
     return output_dir
 
 

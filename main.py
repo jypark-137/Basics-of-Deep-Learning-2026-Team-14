@@ -9,6 +9,7 @@ import argparse
 import importlib
 import os
 import sys
+from nuwa.utils.console import CommandParser
 
 
 COMMANDS = {
@@ -18,7 +19,7 @@ COMMANDS = {
     "evaluate": ("nuwa.engine.eval", "Run official AP-10K evaluation"),
     "train": ("nuwa.engine.train", "Optionally fine-tune model weights with the pose loss"),
     "profile": ("nuwa.utils.utils", "Measure matrix costs, parameters and forward latency"),
-    "prepare": ("nuwa.data.prepare_species", "Prepare the selected AP-10K species subsets"),
+    "prepare": ("nuwa.data.prepare_species", "Prepare AP-10K species subsets and a ready-to-use pose config"),
     "check-model": ("nuwa.model.check_model", "Check model heatmaps and pose-loss gradients"),
     "compare": ("nuwa.finalize_pose", "Export, benchmark and compare baseline/anchor/OFP models"),
     "ablate": ("nuwa.run_pose_ablation", "Run the controlled pruning ablations"),
@@ -27,7 +28,7 @@ COMMANDS = {
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = CommandParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     for name, (module_name, help_text) in COMMANDS.items():
         module = importlib.import_module(module_name)
@@ -40,7 +41,8 @@ def get_args_parser():
 
 def get_args(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if not arguments or (arguments[0].startswith("-") and arguments[0] not in ("-h", "--help")):
+    first = next((argument for argument in arguments if argument != "--verbose"), None)
+    if first is None or (first.startswith("-") and first not in ("-h", "--help")):
         arguments.insert(0, "derive")
     return get_args_parser().parse_args(arguments)
 

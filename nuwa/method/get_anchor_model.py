@@ -25,42 +25,9 @@ from device_utils import add_device_argument, resolve_device
 from ..dataset.utils import make_loaders, move_batch, validate_subsets
 from ..engine.eval import evaluate_ap
 from ..utils.io import atomic_torch_save, file_sha256, frozen_state_sha256
+from .skp import MaskLinear, TopKBinarizer, get_skp_parameters
+from ..utils.console import CommandParser, command_output, detail, display_path
 from .utils import export_masks, load_skp_masks, remaining_neurons, save_masks
-
-class TopKBinarizer(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, inputs:torch.tensor, threshold):
-        threshold = torch.sigmoid(threshold).item()
-        mask = inputs.clone()
-        _, idx = inputs.sort(descending=True)
-        j = math.ceil(threshold * inputs.numel())
-        mask[idx[j:]] = 0.
-        mask[idx[:j]] = 1.
-        ctx.save_for_backward(mask)
-        return mask
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask, = ctx.saved_tensors
-        return grad_output, ((grad_output * mask).sum()).view(-1)
-
-
-class MaskLinear(nn.Linear):
-    def __init__(self, weight, bias, mask, beta, mask_type="mlp", head_dim=64):
-        super().__init__(weight.size(1), weight.size(0), bias=False)
-        self.weight = weight
-        self.bias = bias
-        self.mask = mask
-        self.beta = beta
-        self.mask_type = mask_type
-        self.head_dim = head_dim
-
-    def forward(self, x):
-        mask = TopKBinarizer.apply(self.mask, self.beta)
-        if self.mask_type == "mha":
-            mask = mask.repeat_interleave(self.head_dim)
-        x = x * mask.view(1,1,-1)
-        return nn.functional.linear(x, self.weight, self.bias)
 
 
 def attach_skp_masks(model):
@@ -76,13 +43,6 @@ def attach_skp_masks(model):
         beta = nn.Parameter(torch.zeros(1, device=fc2.weight.device) + 5.0)
         block.mlp.fc2 = MaskLinear(fc2.weight, fc2.bias, mask, beta, mask_type="mlp")
     return get_skp_parameters(model)
-
-
-def get_skp_parameters(model):
-    layers = [block.mlp.fc2 for block in model.backbone.blocks]
-    if not all(isinstance(layer, MaskLinear) for layer in layers):
-        raise ValueError("Expected an SKP mask in every MLP")
-    return [layer.mask for layer in layers], [layer.beta for layer in layers]
 
 
 def set_skp_train_mode(model):
@@ -239,6 +199,27 @@ def _saved_masks_path(args):
     return None
 
 
+def _check_training_output(output_dir):
+    """Permit a fresh run or a retry that wrote only its configuration."""
+    if output_dir.exists() and (not output_dir.is_dir() or any(
+            path.name != "run_config.json" or not path.is_file()
+            for path in output_dir.iterdir())):
+        raise FileExistsError("Mask training output already contains results; choose another --out-dir")
+
+
+def _check_completed_training_settings(args, masks):
+    """An implicit rerun must identify the same mask-training experiment."""
+    saved = masks.get("training_settings", {})
+    names = ("species", "split", "config", "data_root", "steps", "batch_size",
+             "mask_lr", "beta_lr", "weight_decay", "eval_every", "seed",
+             "smoke_test", "uniform")
+    changed = [name for name in names if saved.get(name) != getattr(args, name)]
+    if changed:
+        raise ValueError("Existing anchor training settings differ ({}); choose another --out-dir "
+                         "or select the saved masks explicitly with --masks".format(
+                             ", ".join(changed)))
+
+
 def detach_skp_masks(model):
     """Restore dense fc2 layers before applying the selected saved masks.
 
@@ -280,7 +261,8 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
 
     run_name = datetime.now().strftime("run_%Y%m%d_%H%M%S") + ("_smoke" if args.smoke_test else "")
     output_dir = Path(args.out_dir) if args.out_dir else DEFAULT_OUTPUT_ROOT / "nuwa_skp" / slug / run_name
-    output_dir.mkdir(parents=True, exist_ok=False)
+    _check_training_output(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     args.out_dir = str(output_dir)
     settings = {name: str(value) if isinstance(value, (Path, torch.device)) else value
                 for name, value in vars(args).items()}
@@ -292,7 +274,9 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
     with (output_dir / "run_config.json").open("w", encoding="utf-8") as handle:
         json.dump(settings, handle, indent=2)
         handle.write("\n")
-    print("Device:", device, "| Output:", output_dir, flush=True)
+    print("Learning masks: {} | {} | {} updates{}".format(
+        ", ".join(args.species), device, args.steps, " | smoke test" if args.smoke_test else ""), flush=True)
+    detail("Output:", output_dir, flush=True)
 
     baseline_ap = None
     if val_loader is not None:
@@ -300,7 +284,7 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
         baseline_ap = evaluate_ap(model, val_loader, device, output_dir / "eval" / "unpruned")
     masks, betas = attach_skp_masks(model)
     count = check_trainable_parameters(model)
-    print("Trainable mask/beta parameters:", count, flush=True)
+    detail("Trainable mask/beta parameters:", count, flush=True)
     optimizer = torch.optim.AdamW([
         {"params": masks, "lr": args.mask_lr, "weight_decay": args.weight_decay},
         {"params": betas, "lr": args.beta_lr, "weight_decay": args.weight_decay},
@@ -321,7 +305,7 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
         last_ap, last_eval_step = best_ap, 0
     initial_info = export_masks(model)
     kept, total = remaining_neurons(initial_info)
-    print("Initially masked MLP hidden neurons: {} / {} ({:.2f}%)".format(
+    detail("Initially masked MLP hidden neurons: {} / {} ({:.2f}%)".format(
         total - kept, total, 100 * (1 - kept / total)), flush=True)
     interrupted = False
     start = time.perf_counter()
@@ -391,16 +375,15 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
     if not any(not torch.equal(old, new.detach().cpu())
                for old, new in zip(initial_parameters, masks + betas)) and step > 0:
         raise RuntimeError("No mask or beta parameter changed")
-    print("Original weights and buffers unchanged: PASS", flush=True)
+    detail("Original weights and buffers unchanged: PASS", flush=True)
     if step > 0:
-        print("Mask/beta updates: PASS", flush=True)
+        detail("Mask/beta updates: PASS", flush=True)
     if args.smoke_test:
-        print("{} after {} updates".format("Smoke test stopped" if interrupted else "SKP smoke test passed", step), flush=True)
+        detail("{} after {} updates".format("Smoke test stopped" if interrupted else "SKP smoke test passed", step), flush=True)
     elif best_ap is not None:
         print("Best masked validation AP: {:.2f} at step {} | unpruned: {:.2f}".format(
             100 * best_ap, best_step, 100 * baseline_ap), flush=True)
-        print("Use best_masks.pth for anchor export; compare its AP with the unpruned baseline.", flush=True)
-    print("Masks saved in:", output_dir, flush=True)
+    detail("Masks saved in:", output_dir, flush=True)
     if interrupted:
         raise KeyboardInterrupt
     args.masks = str(output_dir / ("last_masks.pth" if args.smoke_test else "best_masks.pth"))
@@ -445,10 +428,9 @@ def head_focus(model, sub_label=None):
 
 
 def get_anchor_model(args, model, train_loader=None, test_loader=None, focus=True):
-    print("================== Get Anchor Model ==================")
     mask_dict = get_mask(args, model, train_loader, test_loader)
     kept, total = remaining_neurons(mask_dict)
-    print("MLP hidden neurons masked: {:.2f}%".format(100 * (1 - kept / total)))
+    detail("MLP hidden neurons masked: {:.2f}%".format(100 * (1 - kept / total)))
     model_anchor = mask2anchor(args, model, mask_dict)
     if focus:
         model_anchor = head_focus(model_anchor, getattr(args, "sub_label", None))
@@ -457,7 +439,7 @@ def get_anchor_model(args, model, train_loader=None, test_loader=None, focus=Tru
 
 @torch.no_grad()
 def export_anchor(args, model, masks):
-    """Verify mask/pruned/reloaded heatmaps and save the portable anchor."""
+    """Verify and save the portable anchor, or reuse a matching completed one."""
     from mmcv import Config
 
     args = _options(args)
@@ -466,8 +448,9 @@ def export_anchor(args, model, masks):
     masks_path = resolve_input_file(args.masks, "--masks")
     output_dir = Path(args.out_dir) if args.out_dir else masks_path.parent
     output_path, report_path = output_dir / "anchor.pth", output_dir / "anchor_report.json"
-    if output_path.exists() or report_path.exists():
-        raise FileExistsError("Anchor outputs already exist; choose another --out-dir")
+    reuse_existing = output_path.exists() or report_path.exists()
+    if reuse_existing and not (output_path.is_file() and report_path.is_file()):
+        raise FileExistsError("Anchor export is incomplete; choose another --out-dir")
     cfg = Config.fromfile(str(config_path))
     base_hash = file_sha256(base_path)
     if masks.get("base_checkpoint_sha256") != base_hash:
@@ -532,6 +515,29 @@ def export_anchor(args, model, masks):
         "verification_seed": args.seed, "verification_rtol": 1e-4, "verification_atol": 1e-5,
         "source_smoke_test": bool(masks.get("training_settings", {}).get("smoke_test", False)),
     }
+    if reuse_existing:
+        saved_report = json.loads(report_path.read_text(encoding="utf-8"))
+        restored, saved_payload = load_anchor_model(cfg, output_path, device)
+        # Both files must describe these exact inputs, not just have familiar names.
+        names = ("stage", "species", "split", "config_path", "base_checkpoint_sha256",
+                 "source_masks_sha256", "source_mask_step", "original_hidden_sizes",
+                 "hidden_sizes", "parameters_before", "parameters_after", "heatmap_shape",
+                 "source_smoke_test")
+        if any(saved.get(name) != report[name]
+               for saved in (saved_report, saved_payload) for name in names):
+            raise ValueError("Existing anchor inputs differ; choose another --out-dir")
+        keys = list(model.state_dict())
+        if (list(restored.state_dict()) != keys
+                or frozen_state_sha256(restored, keys) != frozen_state_sha256(model, keys)):
+            raise ValueError("Existing anchor weights differ from the saved masks; choose another --out-dir")
+        reload_errors = [compare_heatmaps(forward_heatmaps(restored, images), expected, "Existing anchor")
+                         for images, expected in zip(inputs, reference)]
+        detail("Existing anchor weights and heatmaps: PASS (max error {:.3g})".format(max(reload_errors)))
+        print("Reusing verified anchor{}:".format(" (smoke test)" if report["source_smoke_test"] else ""),
+              display_path(output_path))
+        detail("Report:", display_path(report_path))
+        return restored, saved_report
+
     payload = dict(report)
     payload.update({
         "format_version": 1,
@@ -552,24 +558,23 @@ def export_anchor(args, model, masks):
         candidate_report = Path(temporary) / "anchor_report.json"
         candidate_report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         os.replace(str(candidate_report), str(report_path))
-    print("Device:", device)
+    detail("Device:", device)
     for index, (old, new) in enumerate(zip(original_widths, target_widths)):
-        print("Block {}: MLP hidden neurons {} -> {}".format(index, old, new))
+        detail("Block {}: MLP hidden neurons {} -> {}".format(index, old, new))
     print("Parameters: {:,} -> {:,} ({:.2f}% removed)".format(
         original_count, reduced_count, report["parameter_reduction_percent"]))
-    print("Saved-mask heatmap equivalence: PASS (max error {:.3g})".format(max(errors)))
-    print("Attention, residuals and pose head unchanged: PASS")
-    print("Standalone checkpoint reload: PASS")
+    detail("Saved-mask heatmap equivalence: PASS (max error {:.3g})".format(max(errors)))
+    detail("Attention, residuals and pose head unchanged: PASS")
+    detail("Standalone checkpoint reload: PASS")
     if report["source_smoke_test"]:
-        print("Source: smoke-test masks. This checks conversion; it is not a trained anchor result.")
-    print("Anchor:", output_path)
-    print("Report:", report_path)
-    print("Anchor creation passed. Use the existing evaluation scripts to measure AP.")
+        print("Smoke test: AP not evaluated.")
+    print("Anchor saved:", display_path(output_path))
+    detail("Report:", display_path(report_path))
     return model, report
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = CommandParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--masks", help="Reuse SKP masks and skip training/data loading")
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
@@ -577,7 +582,7 @@ def get_args_parser():
     parser.add_argument("--split", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--out-dir", help="Output folder; defaults to a new run or the mask folder")
+    parser.add_argument("--out-dir", help="Output folder; matching completed anchors are verified and reused")
     add_device_argument(parser)
     parser.add_argument("--steps", type=int, default=10000)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -593,6 +598,7 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     parser = parser or get_args_parser()
     if args.threads <= 0:
@@ -602,6 +608,7 @@ def run(args, parser=None):
         self_test()
         return
     requested_species = args.species
+    explicit_masks = bool(args.masks)
     try:
         args = _options(args)
         args.config = str(resolve_input_file(args.config, "--config"))
@@ -614,9 +621,19 @@ def run(args, parser=None):
         if requested_species is None:
             args.species = normalize_species(checkpoint_header(masks_path).get("species"))
     output_dir = Path(args.out_dir) if args.out_dir else (masks_path.parent if masks_path else None)
-    if output_dir is not None and any((output_dir / name).exists()
-                                     for name in ("anchor.pth", "anchor_report.json")):
-        parser.error("Anchor outputs already exist; choose another --out-dir")
+    reuse_existing = output_dir is not None and any((output_dir / name).exists()
+                                                   for name in ("anchor.pth", "anchor_report.json"))
+    if reuse_existing:
+        if not all((output_dir / name).is_file() for name in ("anchor.pth", "anchor_report.json")):
+            parser.error("Anchor export is incomplete; choose another --out-dir")
+        if masks_path is None:
+            parser.error("Existing anchor needs its source masks for verification; select them with --masks")
+        print("Verifying existing anchor...", flush=True)
+    if output_dir is not None and masks_path is None:
+        try:
+            _check_training_output(output_dir)
+        except FileExistsError as error:
+            parser.error(str(error))
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -642,8 +659,13 @@ def run(args, parser=None):
     model.load_state_dict(checkpoint.get("state_dict", checkpoint), strict=True)
     del checkpoint
     model.to(args.device).eval()
-    masks = get_mask(args, model, train_loader, val_loader)
-    _, report = export_anchor(args, model, masks)
+    try:
+        masks = get_mask(args, model, train_loader, val_loader)
+        if reuse_existing and not explicit_masks:
+            _check_completed_training_settings(args, masks)
+        _, report = export_anchor(args, model, masks)
+    except (ValueError, FileExistsError) as error:
+        parser.error(str(error))
     return report
 
 

@@ -24,6 +24,7 @@ from .utils.utils import MAC_CONVENTION, benchmark_pose, profile_pose_macs
 from .utils.io import atomic_json, atomic_text, file_sha256, fingerprint, state_size_bytes
 from .utils.pose_results import parse_edges, validate_provenance, write_comparison
 from .species import add_species_argument, normalize_species
+from .utils.console import CommandParser, command_output, detail, display_path, library_output
 
 def code_fingerprint():
     files = list(PACKAGE_ROOT.glob("*.py"))
@@ -38,7 +39,7 @@ def code_fingerprint():
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = CommandParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT, help="Original split baseline")
     parser.add_argument("--anchor", required=True, help="SKP anchor anchor.pth")
@@ -60,6 +61,7 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     parser = parser or get_args_parser()
     if args.threads <= 0 or args.warmup < 0 or args.repeats <= 0:
@@ -122,7 +124,8 @@ def run(args, parser=None):
         data_cfg.test_mode = True
         data_cfg.ann_file = str(annotation_path)
         data_cfg.img_prefix = str(image_root) + os.sep
-        dataset = build_dataset(data_cfg)
+        with library_output():
+            dataset = build_dataset(data_cfg)
         if len(dataset) == 0:
             parser.error("No usable validation crops")
         loader = build_dataloader(dataset, samples_per_gpu=1, workers_per_gpu=0,
@@ -175,11 +178,11 @@ def run(args, parser=None):
             if row.get("run_fingerprint") != signature or not export_path.is_file() or file_sha256(export_path) != row.get("export_sha256"):
                 parser.error("Invalid cached result for {}; choose a new output folder".format(label))
             rows.append(row)
-            print("Reusing profile:", label, flush=True)
+            detail("Reusing profile:", label, flush=True)
             continue
         if file_sha256(case["checkpoint"]) != case["sha256"]:
             raise RuntimeError("Source checkpoint changed during the comparison")
-        print("Export, reload, profile and {} benchmark:".format(device), label, flush=True)
+        print("Profiling {} ({})...".format(label, device), flush=True)
         model, info = load_pose_checkpoint(cfg, case["checkpoint"], device)
         model.requires_grad_(False)
         export_portable(model, info, cfg, case["checkpoint"], export_path, reference_hash)
@@ -209,9 +212,9 @@ def run(args, parser=None):
     if not args.smoke_test:
         for row in rows:
             if args.resume and row.get("phase") == "completed" and row.get("ap") is not None:
-                print("Reusing AP:", row["label"], flush=True)
+                detail("Reusing AP:", row["label"], flush=True)
                 continue
-            print("Official {} AP: {}".format(args.split, row["label"]), flush=True)
+            print("Evaluating {} ({})...".format(row["label"], args.split), flush=True)
             model, _ = load_pose_checkpoint(cfg, row["exported_checkpoint"], device)
             results_dir = output_dir / "evaluation" / row["label"]
             results_dir.mkdir(parents=True, exist_ok=True)
@@ -222,7 +225,8 @@ def run(args, parser=None):
                     predictions.append(model(return_loss=False, **move_batch(batch, device)))
                     progress.update()
             mmcv.dump(predictions, str(results_dir / "predictions.pkl"))
-            metrics = dataset.evaluate(predictions, res_folder=str(results_dir), metric="mAP")
+            with library_output():
+                metrics = dataset.evaluate(predictions, res_folder=str(results_dir), metric="mAP")
             metrics = {name: float(value) for name, value in metrics.items()}
             if not math.isfinite(metrics["AP"]) or not 0 <= metrics["AP"] <= 1:
                 raise RuntimeError("Invalid AP for {}".format(row["label"]))
@@ -232,15 +236,20 @@ def run(args, parser=None):
             del model, predictions
             gc.collect()
     summary = write_comparison(output_dir, rows, protocol, "smoke check complete" if args.smoke_test else "complete")
+    if args.smoke_test:
+        print("Smoke test: AP not evaluated.")
+    name_width = max(5, *(len(row["model"]) for row in summary))
+    print("\n{:<{width}}  {:>6}  {:>9}  {:>7}  {:>10}  {:>7}".format(
+        "Model", "AP", "Params(M)", "GMACs", "Median(ms)", "Speedup", width=name_width))
     for row in summary:
-        ap = "AP skipped" if row["AP"] is None else "AP {:.2f}".format(row["AP"])
-        print("{} | {} | {:.2f}M params | {:.3f} GMACs | {:.2f} ms | {:.2f}x".format(
-            row["model"], ap, row["parameters_M"], row["GMACs"], row["median_ms"], row["speedup"]))
-    print("\nPortable weights:", output_dir / "models")
-    print("Resolved config:", output_dir / "config_snapshot.py")
-    print("Comparison:", output_dir / "comparison.md")
-    print("CSV:", output_dir / "comparison.csv")
-    print("JSON:", output_dir / "comparison.json")
+        ap = "-" if row["AP"] is None else "{:.2f}".format(row["AP"])
+        print("{:<{width}}  {:>6}  {:>9.2f}  {:>7.3f}  {:>10.2f}  {:>6.2f}x".format(
+            row["model"], ap, row["parameters_M"], row["GMACs"], row["median_ms"], row["speedup"], width=name_width))
+    print("Comparison:", display_path(output_dir / "comparison.md"))
+    detail("Portable weights:", display_path(output_dir / "models"))
+    detail("Resolved config:", display_path(output_dir / "config_snapshot.py"))
+    detail("CSV:", display_path(output_dir / "comparison.csv"))
+    detail("JSON:", display_path(output_dir / "comparison.json"))
     return summary
 
 

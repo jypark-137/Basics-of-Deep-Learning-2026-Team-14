@@ -32,6 +32,7 @@ from ..model.vit import forward_heatmaps
 from .get_anchor_model import get_anchor_model
 from .pruning import pruning_vit
 from ..species import add_species_argument, normalize_species, species_slug
+from ..utils.console import CommandParser, command_output, display_path, is_verbose
 
 
 def class_specific_derivation_nuwa(args, model, retrain=False):
@@ -65,7 +66,7 @@ def class_specific_derivation_nuwa(args, model, retrain=False):
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = CommandParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT, help="Original split ViTPose weights")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", default=DEFAULT_DATA_ROOT)
@@ -128,6 +129,7 @@ def _fresh_stage_directory(directory, root, resume):
     print("Preserved incomplete stage:", backup, flush=True)
 
 
+@command_output
 def run(args, parser=None):
     from . import get_anchor_model as anchor_module
     from . import pruning as pruning_module
@@ -164,7 +166,7 @@ def run(args, parser=None):
     for split in ("train", "val"):
         path, _, _ = evaluation_paths(Path(args.data_root), args.species, split, args.split_id)
         annotations[split] = file_sha256(path)
-    settings = {key: value for key, value in vars(args).items() if key not in ("resume", "out_dir", "command")}
+    settings = {key: value for key, value in vars(args).items() if key not in ("resume", "out_dir", "command", "verbose")}
     settings.update({"checkpoint": str(base), "base_sha256": base_hash, "config": str(config),
                      "config_sha256": fingerprint(config_snapshot(config)),
                      "code_sha256": finalize_pose.code_fingerprint(), "annotation_sha256": annotations,
@@ -186,6 +188,8 @@ def run(args, parser=None):
         atomic_json(manifest_path, manifest)
     common = ["--config", str(config), "--data-root", args.data_root,
               "--device", str(args.device), "--threads", str(args.threads), "--seed", str(args.seed)]
+    if is_verbose():
+        common.append("--verbose")
     if args.anchor:
         anchor_path = source
     else:
@@ -259,12 +263,14 @@ def run(args, parser=None):
             command.append("--smoke-test")
         if args.resume:
             command.append("--resume")
+        if is_verbose():
+            command.append("--verbose")
         finalize_pose.main(command)
     result = {"species": args.species, "anchor": str(anchor_path), "edge": str(edge), "selected_model": str(selected),
               "comparison": None if args.skip_comparison else str(directory / "comparison/comparison.md"),
               "smoke_test": args.smoke_test}
     atomic_json(directory / "nuwa_result.json", result)
-    print("NuWa outputs:", directory, flush=True)
+    print("Pipeline complete:", display_path(directory), flush=True)
     return result
 
 

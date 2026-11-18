@@ -9,6 +9,7 @@ from ..paths import DEFAULT_DATA_ROOT, DEFAULT_SPECIES, resolve_data_root, resol
 from ..model.utils import pose_config
 from device_utils import resolve_device
 from ..species import category_ids, normalize_species, species_slug
+from ..utils.console import library_output
 
 def evaluation_paths(data_root, species, split, split_id, ann_file=None):
     """Validate the selected dataset without loading images."""
@@ -96,15 +97,25 @@ def validate_subsets(data_root, species, split):
     return slug, paths, selected_ids[0]
 
 
+def apply_data_paths(cfg, paths, data_root):
+    """Bind prepared annotations and images for both saved configs and training."""
+    data_root = resolve_data_root(data_root)
+    if "data" not in cfg or any(part not in cfg.data for part in paths):
+        raise ValueError("The pose config must define data.train and data.val")
+    for part, annotation in paths.items():
+        cfg.data[part].ann_file = str(annotation)
+        cfg.data[part].img_prefix = str(data_root / "data") + os.sep
+        cfg.data[part].test_mode = part != "train"
+    return cfg
+
+
 def make_loaders(cfg, paths, data_root, args):
     from mmpose.datasets import build_dataset, build_dataloader
 
     pin_memory = resolve_device(getattr(args, "device", "auto")).type == "cuda"
-    for part in ("train", "val"):
-        cfg.data[part].ann_file = str(paths[part])
-        cfg.data[part].img_prefix = str(data_root / "data") + os.sep
-        cfg.data[part].test_mode = part == "val"
-    train_data = build_dataset(cfg.data.train)
+    apply_data_paths(cfg, paths, data_root)
+    with library_output():
+        train_data = build_dataset(cfg.data.train)
     if len(train_data) == 0:
         raise ValueError("No usable training animals remain after dataset filtering")
     train_loader = build_dataloader(
@@ -113,14 +124,17 @@ def make_loaders(cfg, paths, data_root, args):
     )
     val_loader = None
     if not args.smoke_test:
-        val_data = build_dataset(cfg.data.val)
+        with library_output():
+            val_data = build_dataset(cfg.data.val)
         if len(val_data) == 0:
             raise ValueError("No usable validation animals remain after dataset filtering")
         val_loader = build_dataloader(
             val_data, samples_per_gpu=1, workers_per_gpu=0, dist=False, shuffle=False, pin_memory=pin_memory,
         )
-        print("Validation animals:", len(val_data), flush=True)
-    print("Training animals:", len(train_data), flush=True)
+    counts = "Dataset: {} training animals".format(len(train_data))
+    if val_loader is not None:
+        counts += ", {} validation animals".format(len(val_data))
+    print(counts, flush=True)
     return train_loader, val_loader
 
 
@@ -147,7 +161,8 @@ def build_pose_dataset(cfg, args, split="train", ann_file=None):
     dataset_cfg.ann_file = str(annotation)
     dataset_cfg.img_prefix = str(image_root) + os.sep
     dataset_cfg.test_mode = split != "train"
-    dataset = build_dataset(dataset_cfg)
+    with library_output():
+        dataset = build_dataset(dataset_cfg)
     if len(dataset) == 0:
         raise ValueError("No usable {} animals remain".format(split))
     return dataset

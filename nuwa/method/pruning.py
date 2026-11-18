@@ -24,6 +24,7 @@ from ..utils.io import atomic_torch_save, file_sha256, frozen_state_sha256
 from ..utils.utils import profile_pose_macs, seed_all
 from .get_calibration_data import calibration_options, collect_training_features, get_activation_and_calibration_features, get_config_and_indices, uniform_widths
 from ..species import add_species_argument, normalize_species, species_slug
+from ..utils.console import CommandParser, command_output, detail, display_path
 
 def energy_ratio(pruning_rate):
     alpha = float(pruning_rate)
@@ -198,8 +199,10 @@ def prune_attention(model, rho):
                       qk_energy_retained=factors["qk_energy_retained"],
                       vo_energy_retained=factors["vo_energy_retained"])
         results.append(result)
-        print("Block {} attention: {} -> QK {}, VO {} per head".format(
+        detail("Block {} attention: {} -> QK {}, VO {} per head".format(
             index, result["original_head_dim"], result["qk_dim"], result["vo_dim"]), flush=True)
+        if index == 0 or (index + 1) % 4 == 0 or index + 1 == len(model.backbone.blocks):
+            print("Attention {}/{}".format(index + 1, len(model.backbone.blocks)), flush=True)
     return results
 
 
@@ -257,7 +260,9 @@ def prune_mlps(model, target_widths, scores, feature_paths, strategy="optimize")
         mlp.fc1, mlp.fc2 = fc1, fc2
         reports.append(dict(diagnostics, block=index, hidden_before=old_width,
                             hidden_after=target, kept_indices=kept.tolist(), compensated=strategy == "optimize"))
-        print("Block {} MLP: {} -> {} ({})".format(index, old_width, target, strategy), flush=True)
+        detail("Block {} MLP: {} -> {} ({})".format(index, old_width, target, strategy), flush=True)
+        if index == 0 or (index + 1) % 4 == 0 or index + 1 == len(widths):
+            print("MLPs {}/{}".format(index + 1, len(widths)), flush=True)
     return reports
 
 
@@ -357,7 +362,7 @@ def pruning_vit(args, model_anchor, original_size, mha=True, mlp=True):
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = CommandParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--anchor", help="SKP anchor.pth; normal full NuWa")
@@ -380,6 +385,7 @@ def get_args_parser():
     return parser
 
 
+@command_output
 def run(args, parser=None):
     parser = parser or get_args_parser()
     if args.threads <= 0:
@@ -422,7 +428,7 @@ def run(args, parser=None):
     cfg = Config.fromfile(str(config_path))
     width, height = map(int, cfg.data_cfg.image_size)
     probe = torch.randn(1, 3, height, width, generator=torch.Generator().manual_seed(args.seed)).to(device)
-    print("Profiling the original full-width pose architecture...", flush=True)
+    print("Profiling the unpruned model...", flush=True)
     dense = build_posenet(cfg.model).to(device).eval()
     original_hidden = hidden_sizes(dense)
     original_profile, _ = profile_pose_macs(dense, probe, forward_heatmaps)
@@ -458,7 +464,7 @@ def run(args, parser=None):
         for suffix in ("attn.qkv.weight", "attn.qkv.bias", "attn.proj.weight",
                        "mlp.fc1.weight", "mlp.fc1.bias", "mlp.fc2.weight"))]
     protected_hash = frozen_state_sha256(model, protected_keys)
-    print("Attention SVD: {} | MLP strategy: {}".format(not args.skip_attention, args.strategy), flush=True)
+    detail("Attention SVD: {} | MLP strategy: {}".format(not args.skip_attention, args.strategy), flush=True)
     attention_report = prune_attention(model, rho) if not args.skip_attention else []
     mha_profile, _ = profile_pose_macs(model, probe, forward_heatmaps)
     unit_costs = mha_profile["per_neuron_macs"]
@@ -471,7 +477,7 @@ def run(args, parser=None):
         targets = uniform_widths(anchor_widths, prune_count) if prune_count else anchor_widths
     except ValueError as error:
         parser.error(str(error))
-    print("Target: {:.2f}% full-pose matrix MAC reduction".format(100 * args.pruning_rate), flush=True)
+    print("Pruning target: {:.1f}% fewer matrix operations".format(100 * args.pruning_rate), flush=True)
     output_dir.mkdir(parents=True, exist_ok=False)
     calibration = {"training_crops_processed": 0, "calibration_crops": 0,
                    "reason": "Attention/SKP already meets the integer MLP budget"}
@@ -536,12 +542,11 @@ def run(args, parser=None):
         original_profile["pose_macs"] / 1e9, final_profile["pose_macs"] / 1e9,
         100 * achieved, 100 * args.pruning_rate), flush=True)
     print("Pose parameters: {:,} -> {:,}".format(original_profile["parameters"], final_profile["parameters"]))
-    print("Finite 17-keypoint heatmaps, protected weights and checkpoint reload: PASS")
+    detail("Finite 17-keypoint heatmaps, protected weights and checkpoint reload: PASS")
     if args.smoke_test or report["source_smoke_test"]:
-        print("Smoke-test result: use a fully trained anchor and a full OFP run for AP comparisons.")
-    print("Checkpoint:", output_dir / "edge.pth")
-    print("Report:", output_dir / "ofp_report.json")
-    print("OFP passed. Use the existing evaluation scripts with this checkpoint to measure AP.")
+        print("Smoke test: AP not evaluated.")
+    print("Pruned model saved:", display_path(output_dir / "edge.pth"))
+    detail("Report:", display_path(output_dir / "ofp_report.json"))
     return report
 
 

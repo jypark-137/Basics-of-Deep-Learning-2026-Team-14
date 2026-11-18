@@ -1,217 +1,209 @@
 # NuWa for ViTPose / AP-10K
 
-This is an independent project package arranged like the original NuWa. It
-uses the ordinary ViTPose backbone, weighted pose loss, and official AP-10K
-evaluator. Keep the existing `vitpose/` checkout and follow
-[SETUP.md](SETUP.md) to configure a CPU or GPU environment.
-Dataset files live in root `data/`, pretrained weights in root
-`checkpoints/`, and experiment outputs in root `outputs/`.
+Prune a ViTPose model for one or more animal species, then compare its accuracy,
+size and inference speed with the original model. The model keeps all 17 AP-10K
+keypoints and runs on CPU or NVIDIA GPU.
 
-See [WORKFLOW.md](WORKFLOW.md) for the research plan and experiment workflow.
+**First time here?** Follow [SETUP.md](SETUP.md) to install dependencies and add
+the dataset and checkpoint. For the research plan, see [WORKFLOW.md](WORKFLOW.md).
 
-For a short walkthrough, start with [GUIDE.md](GUIDE.md).
+## Quick start
 
-## Layout
+Activate your Python environment and run these commands from the project root
+(the folder containing `main.py`).
 
-```text
-main.py                      common CLI; complete derivation is the default
-device_utils.py              shared CPU/CUDA selection
-checkpoints/                 source and split pretrained weights
-data/                        AP-10K data and annotations
-outputs/                   generated models, logs and reports
-nuwa/
-  __main__.py                python -m nuwa entry point
-  paths.py                   shared paths and local ViTPose discovery
-  species.py                 shared species lists and subset identifiers
-  engine/
-    eval.py                  official evaluation; AP fractions and AP points
-    train.py                 optional supervised fine-tuning
-    utils.py                 training logs and portable best/last weights
-  method/
-    get_anchor_model.py      SKP masks and anchor creation
-    get_calibration_data.py   training activations, calibration and allocation
-    pruning.py               attention SVD and MLP reconstruction
-    nuwa.py                  complete species-specific derivation
-    utils.py                 mask I/O and normalization
-  dataset/
-    utils.py                 AP-10K dataset/loaders and batch transfer
-  data/
-    prepare_species.py       generate species train/validation annotations
-  model/
-    vit.py                   pose access, layer metadata and pruned attention
-    utils.py                 model/config/device construction
-    checkpoint.py            portable baseline/anchor/OFP reload and export
-    check_model.py           checkpoint, heatmap and gradient diagnostic
-  utils/
-    utils.py                 seeding, costs, timing and neuron-score utilities
-    io.py                    atomic files and fingerprints
-    pose_results.py          reports, provenance and ablation definitions
-  finalize_pose.py           common comparison and portable exports
-  run_pose_ablation.py       controlled component ablations
-  tests/                    numerical, reload, reporting and training checks
-```
-
-The root `device_utils.py` shares CPU/CUDA selection with the legacy bridge
-scripts.
-
-Classifier/Swin branches and class-index task files are replaced by species selection through
-the existing AP-10K pipelines. The keypoint head retains all 17 channels.
-
-## Commands
-
-Activate your CPU or GPU environment, then run these from the project root:
+### 1. Check the model and prepare your species
 
 ```console
-python main.py --help
-python main.py self-test
 python main.py check-model
-python main.py prepare --list
 python main.py prepare --species dog
 ```
 
-Defaults are `vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py`,
-`checkpoints/split/ap10k.pth`, and `data/ap-10k`. Outputs default
-to `outputs/`. Override paths with `--config`, `--checkpoint`,
-`--data-root`, and `--out-dir`. Use `python main.py ...` or
-`python -m nuwa ...`. Modules use ordinary package imports; run a specific
-module with `python -m nuwa.engine.eval ...` when needed.
+Preparation filters the annotations, reuses the original images, and saves a
+config with the dataset paths filled in. No Python code needs to be edited.
 
-Relative configuration, checkpoint, annotation, data and output paths are
-resolved from the project root, even when a command is started elsewhere.
-
-`outputs/` holds artifacts from every experiment stage: evaluation predictions
-and metrics; learned SKP masks; anchor, pruned and fine-tuned model weights;
-training logs; calibration scores; profiling and comparison reports; and run
-configs/manifests. Source pretrained weights live in `checkpoints/`, and
-dataset images and species annotations live in `data/`.
-
-## Select a species list
-
-Pass multiple names after `--species` to produce one model specialized for
-their combined annotations:
-
-```console
-python main.py prepare --species dog cat
-python main.py derive --species dog cat --pruning-rate 0.4 --out-dir outputs/cat_dog
-python main.py evaluate --checkpoint outputs/cat_dog/ofp/edge.pth
-```
-
-Preparation writes the union to `data/ap-10k/annotations/species/cat__dog/`.
-Original animal/category IDs and official splits are retained; images shared
-by selected species appear once. Mask learning and calibration use the
-combined training subset, and AP uses the combined validation subset. The
-model retains all 17 keypoint channels.
-
-Species names are case-insensitive and order-independent. Quote names with
-spaces, for example `--species cat "brown bear"`. A single name still works,
-and `--species all` selects the official complete annotations. Use
-`python main.py prepare --list` to see valid names.
-
-Saved masks/models record the complete species list. Pruning, fine-tuning,
-evaluation, comparison and ablation inherit that list from their input
-checkpoint when `--species` is omitted. An explicit list must match the
-checkpoint selection. Existing checkpoints containing a single species
-string remain supported.
-
-## CPU and GPU execution
-
-All model commands default to `--device auto`: use the first visible CUDA
-device when PyTorch reports CUDA available, otherwise use CPU. Override this
-with `--device cpu`, `--device cuda`, or `--device cuda:N` on any model command,
-including `compare` and `ablate`. Child stages inherit the selected device.
-The scripts in `bridge/` use the same defaults; `evaluate_cpu.py` keeps its
-legacy filename and supports both devices.
-
-```console
-python main.py check-model
-python main.py derive --species dog --pruning-rate 0.4
-python main.py check-model --device cpu
-python main.py evaluate --checkpoint PATH/edge.pth --device cuda:0
-```
-
-Your A100 MIG allocation exposes about 9.5 GiB, so batch size remains 1 by
-default. Only devices exposed by the GPU allocation / `CUDA_VISIBLE_DEVICES`
-are selected; the assigned MIG device is normally `cuda:0` within the process.
-No GPU model or memory size is hardcoded. A larger GPU uses the same commands;
-increase `--batch-size` explicitly for mask training or fine-tuning as memory
-permits. Calibration and evaluation use one crop at a time.
-
-Model forward/backward and activation collection use the selected device.
-OFP's NumPy SVD and least-squares calculations use CPU, with calibration arrays
-stored on disk. Saved weights remain on CPU so every checkpoint can be loaded
-on either device. Execution uses FP32 without Apex; TF32 is disabled during
-CUDA selection to preserve the masked/pruned heatmap equivalence checks.
-
-Comparison reports record the selected device, visible GPU name/memory and
-CUDA peak allocation. CUDA timings synchronize around each measured forward.
-The CSV/JSON speedup field is `speedup` on both devices; compare runs on the same
-hardware and device. Resume checks include device and hardware information.
-
-A complete connection check performs ten mask updates, prunes using two
-training crops, reloads the checkpoints, and benchmarks synthetic heatmaps:
+### 2. Try a smoke test
 
 ```console
 python main.py derive --species dog --pruning-rate 0.4 --smoke-test --out-dir outputs/dog_smoke
 ```
 
-Run the complete experiment without `--smoke-test` in a new folder:
+This runs ten mask updates, prunes using two training crops, verifies checkpoint
+reloads, and benchmarks the models. Accuracy evaluation is skipped.
+
+### 3. Run the full experiment
 
 ```console
 python main.py derive --species dog --pruning-rate 0.4 --out-dir outputs/dog_full
 ```
 
-The default derivation learns masks for 10,000 updates, exports the anchor,
-performs OFP, and compares baseline/anchor/OFP models. Mask selection uses
-species validation AP, then fewer neurons on ties. Calibration reads training
-images only. Fine-tuning is optional: add `--retrain --finetune-steps 1000`.
-Use `--skip-comparison` when only the generated models are needed.
+The full pipeline learns masks for 10,000 updates, exports an **anchor** (the
+model after mask learning), prunes it, and compares the original, anchor and
+pruned models using validation AP and measured latency.
 
-Reuse completed work by selecting its masks or anchor explicitly:
+`--pruning-rate 0.4` targets a 40% reduction in matrix operations. The report
+shows the achieved reduction and measured speedup. Choose a new output folder
+for each fresh experiment; see [reusing work](#reuse-work) for completed runs.
+
+## Find your results
+
+For the full-run example above:
+
+| File | What it contains |
+| --- | --- |
+| `outputs/dog_full/ofp/edge.pth` | Final pruned model |
+| `outputs/dog_full/comparison/comparison.md` | Accuracy, size and speed comparison |
+| `outputs/dog_full/anchor/anchor.pth` | Model after mask learning |
+| `outputs/dog_full/anchor/best_masks.pth` | Learned masks; used to export an anchor |
+| `outputs/dog_full/finetune/best.pth` | Fine-tuned model, when `--retrain` is enabled |
+
+Comparison results are also saved as CSV and JSON. Smoke runs save
+`last_masks.pth` and, if fine-tuning is enabled, `last.pth` instead of the best
+checkpoints. Smoke outputs are marked in the reports.
+
+Evaluate or profile the pruned model separately:
 
 ```console
-python main.py anchor --masks PATH/best_masks.pth --out-dir PATH/exported_anchor
-python main.py derive --anchor PATH/anchor.pth --pruning-rate 0.4 --out-dir PATH/derived_model
-python main.py prune --anchor PATH/anchor.pth --pruning-rate 0.4 --out-dir PATH/ofp
-python main.py evaluate --checkpoint PATH/ofp/edge.pth
-python main.py profile --checkpoint PATH/ofp/edge.pth --out PATH/profile.json
-python main.py train --checkpoint PATH/ofp/edge.pth --steps 1000 --out-dir PATH/finetune
+python main.py evaluate --checkpoint outputs/dog_full/ofp/edge.pth
+python main.py profile --checkpoint outputs/dog_full/ofp/edge.pth --out outputs/dog_full/profile.json
 ```
 
-`derive --resume` reuses verified completed stages with matching settings and
-inputs. It does not restore a partially completed training optimizer. An
-interrupted mask/fine-tuning run preserves its checkpoints; select a saved
-checkpoint explicitly to start another run. Comparison and ablation commands
-retain their own fingerprint-checked resume support.
+Evaluation uses the species and split recorded in the checkpoint. Profiling
+prints a short summary; `--out` saves the complete JSON report.
 
-## Comparison and ablation
+## Choose species and data
+
+List available species, or prepare one model for cats and dogs together:
 
 ```console
-python main.py compare --anchor PATH/anchor.pth --edge full40=PATH/edge.pth --out-dir PATH/comparison
-python main.py ablate --anchor PATH/anchor.pth --rates 0.4 0.6 --out-dir PATH/ablation
+python main.py prepare --list
+python main.py prepare --species cat dog
+python main.py derive --species cat dog --pruning-rate 0.4 --out-dir outputs/cat_dog
 ```
 
-Comparison exports independent models, verifies their heatmaps after reload,
-and writes `comparison.md`, CSV/JSON, configuration snapshots and provenance.
-Ablations retain the existing activation, reconstruction, without-SKP,
-without-compensation and full-NuWa cases. `--smoke-test` skips AP; smoke-source
-models remain marked in the reports.
+Names are case-insensitive and order-independent. Quote names containing spaces,
+such as `--species cat "brown bear"`. Use `--species all` for the complete dataset.
+Later model commands inherit the species from their input checkpoint when the
+option is omitted; an explicit selection must match that checkpoint.
 
-## Units and supported behavior
+Preparation keeps the official train/validation split and original IDs. For
+cats and dogs, it writes annotations under
+`data/ap-10k/annotations/species/cat__dog/` and a config at
+`outputs/nuwa_prepare/cat__dog/split1/config.py`. Model commands apply the dataset
+paths automatically. To choose the config source and destination, use
+`python main.py prepare --species cat dog --config path/to/source.py --out-config outputs/cat_dog_config.py`.
 
-`engine.eval.evaluate` returns AP points (0–100), matching the original NuWa
-interface. `evaluate_ap`, `evaluate_metrics`, checkpoint fields and JSON metrics
-use fractional AP (0–1). Baseline, anchor and OFP all use the same pose decoder,
-configured flip testing and official evaluator.
+Split 1 is the default. To use another official split, select it in both commands:
 
-`get_gflops` retains NuWa's historical one-MAC-as-one-operation convention and
-returns GMACs for the complete pose model. Profiling/reports explicitly also
-show matrix GFLOPs at two FLOPs per MAC. Timing covers heatmap forward only;
-it excludes data loading, preprocessing, decoding and flip testing. Reduced
-matrix counts do not imply a measured latency improvement.
+```console
+python main.py prepare --species dog --split 2
+python main.py derive --species dog --split-id 2 --pruning-rate 0.4 --out-dir outputs/dog_split2
+```
 
-SKP uses the original mask/gradient rule, per-block betas and AdamW settings.
-OFP retains the existing uniform/random workflow, eight-wide rounding,
-bias-augmented attention factorization and pseudoinverse reconstruction.
-Optional neuron-scoring experiments preserve dense shapes when zeroing
-columns. Full-dataset AP and training quality must be measured on real runs;
-smoke runs check implementation and reload behavior.
+### Default locations
+
+| Input or output | Default location |
+| --- | --- |
+| AP-10K dataset | `data/ap-10k/` |
+| Pretrained checkpoint | `checkpoints/split/ap10k.pth` |
+| Model config | [ViTPose-S AP-10K config](vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py) |
+| Generated files | `outputs/` |
+
+Use `--data-root`, `--checkpoint`, `--config` and `--out-dir` to override these
+locations. Pass the same data root to preparation and model commands. Relative
+paths are resolved from the project root; absolute paths are also accepted.
+
+## Common options
+
+| Option | Use it to |
+| --- | --- |
+| `--device cpu` | Force CPU execution |
+| `--device cuda:0` | Use the first GPU visible to the process |
+| `--batch-size 2` | Increase the mask-training or fine-tuning batch size if memory permits |
+| `--threads 2` | Set the number of PyTorch CPU threads |
+| `--retrain --finetune-steps 1000` | Fine-tune model weights after pruning |
+| `--skip-comparison` | Stop after generating models |
+| `--verbose` | Show per-layer details, verification checks and library output |
+
+Model commands default to `--device auto`: CUDA when available, otherwise CPU.
+An explicit CUDA selection reports an error if that device is unavailable.
+Training batch size defaults to 1. Evaluation and calibration use one crop at a
+time. On a shared GPU or MIG allocation, device numbers refer to the devices
+visible inside your session.
+
+## Reuse work
+
+**Reuse an anchor** to skip mask learning in a new experiment:
+
+```console
+python main.py derive --anchor outputs/dog_full/anchor/anchor.pth --pruning-rate 0.6 --out-dir outputs/dog_60
+```
+
+**Export saved masks** as a standalone anchor:
+
+```console
+python main.py anchor --masks outputs/dog_full/anchor/best_masks.pth --out-dir outputs/dog_anchor
+```
+
+Repeating the same `anchor` command verifies and reuses a matching completed
+anchor without rewriting it. Empty output folders and folders containing only
+a configuration from a failed initialization can also be retried.
+
+**Resume a pipeline** with the original command and `--resume`:
+
+```console
+python main.py derive --species dog --pruning-rate 0.4 --out-dir outputs/dog_full --resume
+```
+
+Resume reuses verified completed stages with matching inputs, settings, code and device.
+It does not restore a partially completed training optimizer. If mask learning
+was interrupted, select its saved masks with `--masks` in a new run. For
+interrupted fine-tuning, use the saved checkpoint as input to a new `train` run.
+Comparison and ablation commands also support `--resume`.
+
+## Other commands
+
+| Command | Purpose |
+| --- | --- |
+| `anchor` | Learn masks and export an anchor, or export existing masks |
+| `prune` | Prune an existing anchor |
+| `train` | Fine-tune an existing model |
+| `compare` | Compare existing original, anchor and pruned models |
+| `ablate` | Run controlled pruning experiments |
+| `check-model` | Check checkpoint loading, heatmaps and gradients |
+| `self-test` | Run project checks without data or pretrained weights |
+
+For example, compare existing models or run the ablation study:
+
+```console
+python main.py compare --anchor outputs/dog_full/anchor/anchor.pth --edge nuwa=outputs/dog_full/ofp/edge.pth --out-dir outputs/comparison
+python main.py ablate --anchor outputs/dog_full/anchor/anchor.pth --rates 0.4 0.6 --out-dir outputs/ablation
+```
+
+Use `python main.py --help` to list commands and `python main.py derive --help`
+for command options. `python -m nuwa ...` is an equivalent entry point. See
+[SETUP.md#troubleshooting](SETUP.md#troubleshooting) if a command fails.
+
+<details>
+<summary>Measurement and implementation notes</summary>
+
+- Console AP and comparison tables use points from 0 to 100. JSON metrics and
+  saved validation AP values use fractions from 0 to 1. The Python helper
+  `engine.eval.evaluate` returns AP points; `evaluate_ap` and `evaluate_metrics`
+  use fractions.
+- MACs count matrix operations for the complete pose model. Matrix GFLOPs use
+  two FLOPs per MAC. The legacy `get_gflops` helper returns GMACs.
+- Timing measures heatmap forward only. It excludes image loading,
+  preprocessing, decoding and flip testing. Compare latency on the same device
+  and hardware; fewer matrix operations do not guarantee lower latency.
+- Model computation uses FP32. CUDA selection disables TF32 for heatmap
+  equivalence checks. NumPy SVD and least-squares calculations run on CPU, with
+  calibration features stored on disk. Checkpoints can load on CPU or GPU.
+- Mask learning (SKP) uses the original top-k/gradient rule, per-block betas and
+  AdamW. Pruning (OFP) uses attention factorization, eight-wide MLP rounding and
+  pseudoinverse reconstruction. Mask selection uses validation AP, then fewer
+  neurons on ties; calibration reads training images only.
+- Smoke runs check execution and checkpoint conversion. Use full runs to assess
+  accuracy and training quality.
+
+</details>
