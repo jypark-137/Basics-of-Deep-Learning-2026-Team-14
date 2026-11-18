@@ -28,7 +28,7 @@ This checkout uses the older MMPose/MMCV APIs. The reference versions are:
 
 | Component | Version / source |
 | --- | --- |
-| Python | 3.9; locally verified with 3.9.25 |
+| Python | 3.9 |
 | PyTorch | 1.11.0, with the CPU or CUDA 11.3 build |
 | torchvision | 0.12.0, matching the PyTorch build |
 | MMCV distribution | `mmcv-full==1.4.8`, matching PyTorch and CPU/CUDA |
@@ -318,8 +318,6 @@ stages, model reuse, profiling, ablation, and resume options.
 | CUDA out of memory | Keep training batch size at 1 on the MIG allocation, check other GPU processes, and use the small config. The project also supports explicit CPU execution. |
 | Output directory already exists | Choose another `--out-dir`, or use the documented `--resume` option with matching settings and completed stages. |
 
-The existing Windows environment has been exercised on CPU and an MX250
-CUDA GPU, including complete smoke workflows and small official AP checks.
 The fresh CPU/CUDA installation recipes use published matching wheel
 indexes; they were not installed into new environments while writing this
 guide. Run the checks above on the actual A100 MIG or replacement GPU before

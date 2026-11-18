@@ -23,7 +23,7 @@ from ..model.checkpoint import ANCHOR_STAGE, BASE_STAGE, OFP_STAGE, load_anchor_
 from device_utils import add_device_argument, resolve_device
 from ..utils.io import atomic_torch_save, file_sha256, frozen_state_sha256
 from ..utils.utils import profile_pose_macs, seed_all
-from .get_clibration_data import calibration_options, collect_training_features, get_activation_and_calibration_features, get_config_and_indices, uniform_widths
+from .get_calibration_data import calibration_options, collect_training_features, get_activation_and_calibration_features, get_config_and_indices, uniform_widths
 
 def energy_ratio(pruning_rate):
     alpha = float(pruning_rate)

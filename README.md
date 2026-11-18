@@ -603,7 +603,7 @@ Neuron-wise Mask 수는 작지만 **Gradient가 12개 ViT Block을 지나므로 
 
 > 아래는 **공식 코드에서 확인된 사실**과 본 문서의 **제안 실험 설계**를 구분하기 위한 참고 링크다.
 
-1. [NuWa 공식 코드 — CGCL-codes/NuWa](https://github.com/CGCL-codes/NuWa): SKP/OFP 및 ViT Pruning 구현 참고. 특히 `method/pruning.py`, `method/get_anchor_model.py`, `method/get_clibration_data.py`.
+1. [NuWa 공식 코드 — CGCL-codes/NuWa](https://github.com/CGCL-codes/NuWa): SKP/OFP 및 ViT Pruning 구현 참고. 특히 `method/pruning.py`, `method/get_anchor_model.py` 및 calibration 데이터 수집 구현.
 2. [ViTPose/ViTPose++ 공식 코드](https://github.com/ViTAE-Transformer/ViTPose): 일반 ViT 및 ViTMoE Backbone, AP-10K Config, 사전학습 모델 제공.
 3. [ViTPose `tools/model_split.py`](https://github.com/ViTAE-Transformer/ViTPose/blob/main/tools/model_split.py): Multi-task Expert를 태스크별 일반 MLP 출력으로 병합하는 코드. 키 정리 버그 가능성 및 출력 동등성 테스트 필요.
 4. [ViTPose-S AP-10K Config](https://github.com/ViTAE-Transformer/ViTPose/blob/main/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py): 256×192, 17 Keypoint, 일반 ViT Backbone 설정.

@@ -261,7 +261,7 @@ def get_score(args, model, metric="mag"):
         model.to(device).eval()
         cfg = getattr(args, "cfg", None) or pose_config(getattr(args, "config", None))
         if metric == "act":
-            from ..method.get_clibration_data import get_activation_and_calibration_features
+            from ..method.get_calibration_data import get_activation_and_calibration_features
             options = argparse.Namespace(**vars(args))
             options.strategy, options.device, options.cfg = "prune", str(device), cfg
             with tempfile.TemporaryDirectory(prefix="nuwa_scores_") as directory:

@@ -2,8 +2,9 @@
 
 This is an independent project package arranged like the original NuWa. It
 uses the ordinary ViTPose backbone, weighted pose loss, and official AP-10K
-evaluator. Keep the existing `vitpose/` checkout and configured `idl_proj`
-environment. Dataset files live in root `data/`, pretrained weights in root
+evaluator. Keep the existing `vitpose/` checkout and follow
+[SETUP.md](../SETUP.md) to configure a CPU or GPU environment.
+Dataset files live in root `data/`, pretrained weights in root
 `checkpoints/`, and experiment outputs in root `outputs/`.
 
 ## Layout
@@ -23,7 +24,7 @@ nuwa/
     utils.py                 training logs and portable best/last weights
   method/
     get_anchor_model.py      SKP masks and anchor creation
-    get_clibration_data.py   training activations, calibration and allocation
+    get_calibration_data.py   training activations, calibration and allocation
     pruning.py               attention SVD and MLP reconstruction
     nuwa.py                  complete species-specific derivation
     utils.py                 mask I/O and normalization
@@ -48,16 +49,14 @@ nuwa/
 The root `device_utils.py` shares CPU/CUDA selection with the legacy bridge
 scripts.
 
-The spelling `get_clibration_data.py` matches upstream. Classifier/Swin
-branches and class-index task files are replaced by species selection through
+Classifier/Swin branches and class-index task files are replaced by species selection through
 the existing AP-10K pipelines. The keypoint head retains all 17 channels.
 
 ## Commands
 
-Run these from the project root using the existing environment:
+Activate your CPU or GPU environment, then run these from the project root:
 
 ```console
-conda activate idl_proj
 python main.py --help
 python main.py self-test
 python main.py check-model
