@@ -9,6 +9,8 @@ Dataset files live in root `data/`, pretrained weights in root
 
 See [WORKFLOW.md](WORKFLOW.md) for the research plan and experiment workflow.
 
+For a short walkthrough, start with [GUIDE.md](GUIDE.md).
+
 ## Layout
 
 ```text
