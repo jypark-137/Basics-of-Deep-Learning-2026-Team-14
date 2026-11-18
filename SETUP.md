@@ -11,11 +11,11 @@ dependencies described below.
 
 ## Choose an environment
 
-If the existing `idl_proj` environment is working, activate it and continue
+If the existing environment is working, activate it and continue
 with [data and checkpoint setup](#data-and-checkpoint-setup):
 
 ```console
-conda activate idl_proj
+conda activate [ENVIRONMENT_NAME]
 python -c "import sys; print(sys.executable)"
 ```
 
