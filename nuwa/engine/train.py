@@ -27,6 +27,7 @@ from ..utils.io import atomic_json
 from ..utils.utils import set_seed
 from .eval import evaluate
 from .utils import get_delta_acc, log_metrics, save_model
+from .scheduler import add_scheduler_arguments, make_scheduler, scheduler_settings
 from ..species import add_species_argument, normalize_species, species_slug
 from ..utils.console import CommandParser, command_output, display_path
 
@@ -54,6 +55,7 @@ claimed to be resumable; completed checkpoints can be used as new inputs.
     lr, decay = getattr(args, "learning_rate", 1e-4), getattr(args, "weight_decay", 0.05)
     if min(steps, every, log_every) <= 0 or not math.isfinite(lr) or lr <= 0 or not math.isfinite(decay) or decay < 0:
         raise ValueError("Use positive update/evaluation counts and LR, with nonnegative weight decay")
+    schedule = scheduler_settings(args, steps)
     device = resolve_device(getattr(args, "device", None), model)
     model.to(device)
     model.requires_grad_(True)
@@ -61,8 +63,15 @@ claimed to be resumable; completed checkpoints can be used as new inputs.
                      or DEFAULT_OUTPUT_ROOT / "training")
     directory.mkdir(parents=True, exist_ok=True)
     args.out_dir = str(directory)
+    settings = {"steps": steps, "learning_rate": lr, "weight_decay": decay,
+                "batch_size": getattr(args, "batch_size", getattr(train_loader, "batch_size", 1)),
+                "eval_every": every, "log_every": log_every, "device": str(device),
+                "lr_schedule": schedule}
+    args._model_info = dict(getattr(args, "_model_info", {}), finetune_training_settings=settings)
+    atomic_json(directory / "run_config.json", settings)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=decay,
                                   betas=(0.9, 0.999), eps=1e-8, amsgrad=False)
+    scheduler = make_scheduler(optimizer, schedule)
     model.zero_grad(set_to_none=True)
     best_ap = last_ap = None
     last_eval_step = -1
@@ -75,6 +84,8 @@ claimed to be resumable; completed checkpoints can be used as new inputs.
                                     output_dir=directory / "eval" / "initial")
         save_model(args, model, best_name, step=0, val_ap=best_ap / 100)
         last_eval_step = 0
+    log_metrics(directory, {"event": "initial", "val_ap": None if last_ap is None else last_ap / 100,
+                            "learning_rate": optimizer.param_groups[0]["lr"], "lr_schedule": schedule})
     iterator = iter(train_loader)
     update = 0
     completed = 0
@@ -96,12 +107,17 @@ claimed to be resumable; completed checkpoints can be used as new inputs.
             if any(parameter.grad is not None and not torch.isfinite(parameter.grad).all().item()
                    for parameter in model.parameters()):
                 raise RuntimeError("Nonfinite fine-tuning gradient")
+            current_lr = optimizer.param_groups[0]["lr"]
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
             completed = update
             if update == 1 or update % log_every == 0 or update == steps:
-                event = {"event": "train", "step": update, "loss": float(loss.item())}
+                event = {"event": "train", "step": update, "loss": float(loss.item()),
+                         "learning_rate": current_lr}
                 log_metrics(directory, event)
-                print("Fine-tuning {}/{} | loss {:.6f}".format(update, steps, event["loss"]), flush=True)
+                print("Fine-tuning {}/{} | loss {:.6f} | LR {:.2e}".format(
+                    update, steps, event["loss"], current_lr), flush=True)
             if not smoke and (update % every == 0 or update == steps):
                 ap = evaluate(model, test_loader, device=device,
                               output_dir=directory / "eval" / "update_{:06d}".format(update))
@@ -134,6 +150,7 @@ def get_args_parser():
     parser.add_argument("--steps", "--num_steps", dest="steps", type=int, default=1000)
     parser.add_argument("--batch-size", "--train_batch_size", dest="batch_size", type=int, default=1)
     parser.add_argument("--learning-rate", "--learning_rate", dest="learning_rate", type=float, default=1e-4)
+    add_scheduler_arguments(parser)
     parser.add_argument("--weight-decay", type=float, default=0.05)
     parser.add_argument("--eval-every", type=int, default=100)
     parser.add_argument("--log-every", type=int, default=10)
@@ -177,6 +194,7 @@ def run(args, parser=None):
     report = {"checkpoint": str(selected), "source_checkpoint": str(checkpoint),
               "species": args.species, "split_id": args.split_id,
               "best_val_ap": None if ap is None else ap / 100,
+              "training_settings": args._model_info["finetune_training_settings"],
               "smoke_test": args.smoke_test, "reload_verification": verification}
     atomic_json(directory / "training_report.json", report)
     if args.smoke_test:

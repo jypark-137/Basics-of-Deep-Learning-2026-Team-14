@@ -4,6 +4,9 @@ Prune a ViTPose model for one or more animal species, then compare its accuracy,
 size and inference speed with the original model. The model keeps all 17 AP-10K
 keypoints and runs on CPU or NVIDIA GPU.
 
+The default model is ViTPose-B (Base), using the AP-10K task checkpoint at
+`checkpoints/split_base/ap10k.pth`.
+
 **First time here?** Follow [SETUP.md](SETUP.md) to install dependencies and add
 the dataset and checkpoint. For the research plan, see [WORKFLOW.md](WORKFLOW.md).
 
@@ -25,23 +28,29 @@ config with the dataset paths filled in. No Python code needs to be edited.
 ### 2. Try a smoke test
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --smoke-test --out-dir outputs/dog_smoke
+python main.py derive --species dog --pruning-rate 0.1 --smoke-test --out-dir outputs/dog_smoke
 ```
 
 This runs ten mask updates, prunes using two training crops, verifies checkpoint
 reloads, and benchmarks the models. Accuracy evaluation is skipped.
 
+Smoke checkpoints test execution and conversion, not accuracy. Their AP can be
+near zero: with the default config, two crops provide only 384 token rows to
+reconstruct each pruned MLP, which can have more retained neurons than calibration
+rows. A tiny reconstruction error on those crops does not establish validation
+accuracy. Use the full experiment below for accuracy comparisons.
+
 ### 3. Run the full experiment
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --out-dir outputs/dog_full
+python main.py derive --species dog --pruning-rate 0.1 --out-dir outputs/dog_full
 ```
 
 The full pipeline learns masks for 10,000 updates, exports an **anchor** (the
 model after mask learning), prunes it, and compares the original, anchor and
 pruned models using validation AP and measured latency.
 
-`--pruning-rate 0.4` targets a 40% reduction in matrix operations. The report
+`--pruning-rate 0.1` targets a 10% reduction in matrix operations. The report
 shows the achieved reduction and measured speedup. Choose a new output folder
 for each fresh experiment; see [reusing work](#reuse-work) for completed runs.
 
@@ -78,7 +87,7 @@ List available species, or prepare one model for cats and dogs together:
 ```console
 python main.py prepare --list
 python main.py prepare --species cat dog
-python main.py derive --species cat dog --pruning-rate 0.4 --out-dir outputs/cat_dog
+python main.py derive --species cat dog --pruning-rate 0.1 --out-dir outputs/cat_dog
 ```
 
 Names are case-insensitive and order-independent. Quote names containing spaces,
@@ -97,7 +106,7 @@ Split 1 is the default. To use another official split, select it in both command
 
 ```console
 python main.py prepare --species dog --split 2
-python main.py derive --species dog --split-id 2 --pruning-rate 0.4 --out-dir outputs/dog_split2
+python main.py derive --species dog --split-id 2 --pruning-rate 0.1 --out-dir outputs/dog_split2
 ```
 
 ### Default locations
@@ -105,13 +114,16 @@ python main.py derive --species dog --split-id 2 --pruning-rate 0.4 --out-dir ou
 | Input or output | Default location |
 | --- | --- |
 | AP-10K dataset | `data/ap-10k/` |
-| Pretrained checkpoint | `checkpoints/split/ap10k.pth` |
-| Model config | [ViTPose-S AP-10K config](vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py) |
+| Pretrained checkpoint | `checkpoints/split_base/ap10k.pth` |
+| Model config | [ViTPose-B AP-10K config](vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_base_ap10k_256x192.py) |
 | Generated files | `outputs/` |
 
 Use `--data-root`, `--checkpoint`, `--config` and `--out-dir` to override these
 locations. Pass the same data root to preparation and model commands. Relative
 paths are resolved from the project root; absolute paths are also accepted.
+When evaluating older ViTPose-S checkpoints, pass the matching
+[Small config](vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py)
+with `--config`.
 
 ## Common options
 
@@ -122,6 +134,8 @@ paths are resolved from the project root; absolute paths are also accepted.
 | `--batch-size 2` | Increase the mask-training or fine-tuning batch size if memory permits |
 | `--threads 2` | Set the number of PyTorch CPU threads |
 | `--retrain --finetune-steps 1000` | Fine-tune model weights after pruning |
+| `--lr-scheduler cosine` | Enable warmup and cosine decay for mask learning and fine-tuning |
+| `--warmup-steps 100 --min-lr-ratio 0.1` | Warm up over 100 updates, then decay to 10% of each peak LR |
 | `--skip-comparison` | Stop after generating models |
 | `--verbose` | Show per-layer details, verification checks and library output |
 
@@ -130,6 +144,26 @@ An explicit CUDA selection reports an error if that device is unavailable.
 Training batch size defaults to 1. Evaluation and calibration use one crop at a
 time. On a shared GPU or MIG allocation, device numbers refer to the devices
 visible inside your session.
+
+Default peak learning rates are the original values: `--mask-lr 1e-3`,
+`--beta-lr 0.1`, and `--learning-rate 1e-4` for fine-tuning. The default pruning target is 10%
+(`--pruning-rate 0.1`). Learning rates
+are constant by default (`--lr-scheduler none`). To use warmup and cosine
+decay for a Base experiment with fine-tuning, run:
+
+```console
+python main.py derive --species cat dog --device cuda:0 --pruning-rate 0.1 --lr-scheduler cosine --retrain --out-dir outputs/cat_dog_base_alpha01_original_lr_finetuned
+```
+
+The specified learning rates are the peaks. Each training stage warms up from
+peak / warmup-updates to its peak, then decays to the selected fraction on its
+last update. Warmup is capped to one less than the stage's update count for
+short or smoke runs. Without warmup, cosine starts at the peak. Each parameter
+group keeps its own peak and floor. `anchor` and `train` accept the same schedule
+options. Actual update rates are printed and recorded in `history.jsonl`;
+effective schedule settings are saved in run configs and training checkpoints.
+Use a fresh output folder when changing the schedule. Its effect on AP must be
+measured in a new experiment.
 
 ## Reuse work
 

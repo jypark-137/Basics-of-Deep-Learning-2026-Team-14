@@ -120,6 +120,7 @@ def main():
             batch = scatter(batch, [-1 if device.type == "cpu" else device.index])[0]
             outputs.append(model(return_loss=False, **batch))
             progress.update()
+    print(file=progress.file, flush=True)
 
     mmcv.dump(outputs, str(output_dir / "predictions.pkl"))
     metrics = dataset.evaluate(outputs, res_folder=str(output_dir), metric="mAP")

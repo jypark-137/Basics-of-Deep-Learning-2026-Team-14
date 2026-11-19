@@ -21,6 +21,10 @@ def parse_args(argv=None):
                         help='Input ViTPose++ checkpoint')
     parser.add_argument('--target', type=Path, default=Path('checkpoints/split'),
                         help='Output directory for task checkpoints')
+    parser.add_argument('--tasks', nargs='+',
+                        choices=('coco', 'aic', 'mpii', 'ap10k', 'apt36k', 'wholebody'),
+                        default=['coco', 'aic', 'mpii', 'ap10k', 'apt36k', 'wholebody'],
+                        help='Task checkpoints to export; default: all tasks')
     args = parser.parse_args(argv)
     args.source = (PROJECT_ROOT / args.source.expanduser()).resolve()
     args.target = (PROJECT_ROOT / args.target.expanduser()).resolve()
@@ -60,7 +64,8 @@ def main(argv=None):
             value = torch.cat([value, experts[key.replace('fc2.', f'experts.{target_expert}.')]], dim=0)
             new_ckpt['state_dict'][key] = value
 
-    torch.save(new_ckpt, os.path.join(args.target, 'coco.pth'))
+    if 'coco' in args.tasks:
+        torch.save(new_ckpt, os.path.join(args.target, 'coco.pth'))
 
     names = ['aic', 'mpii', 'ap10k', 'apt36k','wholebody']
     num_keypoints = [14, 16, 17, 17, 133]
@@ -82,6 +87,9 @@ def main(argv=None):
     exist_range = True
 
     for i in range(5):
+
+        if names[i] not in args.tasks:
+            continue
 
         new_ckpt = copy.deepcopy(ckpt)
 

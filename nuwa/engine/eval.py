@@ -34,6 +34,8 @@ def evaluate_metrics(model, test_loader, device=None, output_dir=None, progress=
         outputs.append(model(return_loss=False, **data))
         if indicator is not None:
             indicator.update()
+    if indicator is not None:
+        print(file=indicator.file, flush=True)
 
     def score(directory):
         directory = Path(directory)
@@ -107,6 +109,12 @@ def run(args, parser=None):
     cfg = Config.fromfile(str(config_path))
     model, info = load_pose_checkpoint(cfg, checkpoint_path, device)
     stage = info.get("stage", BASE_STAGE)
+    if info.get("smoke_test") or info.get("source_smoke_test"):
+        print("Smoke-test checkpoint: reduced mask training or calibration was used. "
+              "AP is diagnostic; use a full derive run for accuracy comparisons.", flush=True)
+        calibration_crops = info.get("calibration", {}).get("calibration_crops")
+        if calibration_crops is not None:
+            print("OFP calibration: {} training crops.".format(calibration_crops), flush=True)
     species = normalize_species(args.species or info.get("species") or DEFAULT_SPECIES)
     if stage != BASE_STAGE and normalize_species(info.get("species")) != species:
         parser.error("--species must match the species used to learn this checkpoint")

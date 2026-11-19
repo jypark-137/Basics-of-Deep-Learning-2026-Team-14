@@ -33,6 +33,7 @@ from .get_anchor_model import get_anchor_model
 from .pruning import pruning_vit
 from ..species import add_species_argument, normalize_species, species_slug
 from ..utils.console import CommandParser, command_output, display_path, is_verbose
+from ..engine.scheduler import add_scheduler_arguments, scheduler_settings
 
 
 def class_specific_derivation_nuwa(args, model, retrain=False):
@@ -76,7 +77,7 @@ def get_args_parser():
     reuse.add_argument("--anchor", help="Reuse an exported anchor; skip mask learning")
     reuse.add_argument("--masks", help="Reuse learned masks; skip mask learning")
     parser.add_argument("--out-dir", "--output_dir", dest="out_dir")
-    parser.add_argument("--pruning-rate", "--pruning_rate", dest="pruning_rate", type=float, default=0.4)
+    parser.add_argument("--pruning-rate", "--pruning_rate", dest="pruning_rate", type=float, default=0.1)
     parser.add_argument("--steps", "--num_steps", dest="steps", type=int, default=10000)
     parser.add_argument("--batch-size", "--train_batch_size", dest="batch_size", type=int, default=1)
     parser.add_argument("--mask-lr", type=float, default=1e-3)
@@ -90,6 +91,7 @@ def get_args_parser():
     parser.add_argument("--retrain", action="store_true", help="Optionally fine-tune the OFP model")
     parser.add_argument("--finetune-steps", type=int, default=1000)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
+    add_scheduler_arguments(parser)
     parser.add_argument("--skip-comparison", action="store_true")
     add_device_argument(parser)
     parser.add_argument("--threads", type=int, default=1)
@@ -138,6 +140,10 @@ def run(args, parser=None):
     if min(args.threads, args.steps, args.batch_size, args.eval_every, args.log_every,
            args.calibration_samples, args.finetune_steps, args.repeats) <= 0 or args.warmup < 0:
         parser.error("Counts must be positive; warmup may be zero")
+    try:
+        scheduler_settings(args, args.steps)
+    except ValueError as error:
+        parser.error(str(error))
     args.device = str(resolve_device(args.device))
     pruning_module.energy_ratio(args.pruning_rate)
     torch.set_num_threads(args.threads)
@@ -188,6 +194,9 @@ def run(args, parser=None):
         atomic_json(manifest_path, manifest)
     common = ["--config", str(config), "--data-root", args.data_root,
               "--device", str(args.device), "--threads", str(args.threads), "--seed", str(args.seed)]
+    schedule_command = ["--lr-scheduler", args.lr_scheduler,
+                        "--warmup-steps", str(args.warmup_steps),
+                        "--min-lr-ratio", str(args.min_lr_ratio)]
     if is_verbose():
         common.append("--verbose")
     if args.anchor:
@@ -200,7 +209,7 @@ def run(args, parser=None):
             if anchor_dir.exists() and not args.masks:
                 parser.error("Incomplete anchor stage: explicitly select saved --masks or use a new run folder")
             _fresh_stage_directory(anchor_dir, directory, args.resume)
-            command = common + ["--species", *args.species, "--split", str(args.split_id),
+            command = common + schedule_command + ["--species", *args.species, "--split", str(args.split_id),
                                 "--out-dir", str(anchor_dir), "--steps", str(args.steps),
                                 "--batch-size", str(args.batch_size), "--mask-lr", str(args.mask_lr),
                                 "--beta-lr", str(args.beta_lr), "--weight-decay", str(args.weight_decay),
@@ -242,7 +251,7 @@ def run(args, parser=None):
                           manifest["completed"].get("finetune")):
             if train_dir.exists():
                 parser.error("Incomplete fine-tuning stage: select its checkpoint with the train command")
-            command = common + ["--checkpoint", str(edge), "--species", *args.species,
+            command = common + schedule_command + ["--checkpoint", str(edge), "--species", *args.species,
                                 "--split-id", str(args.split_id), "--out-dir", str(train_dir),
                                 "--steps", str(args.finetune_steps), "--batch-size", str(args.batch_size),
                                 "--learning-rate", str(args.learning_rate), "--weight-decay", str(args.weight_decay)]

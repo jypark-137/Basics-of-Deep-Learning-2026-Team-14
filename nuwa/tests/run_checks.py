@@ -24,7 +24,7 @@ def run(args, parser=None):
             check_anchor.main()
             check_ofp.check_torch()
             check_final_steps.check_torch()
-        from . import test_anchor_training, test_configuration, test_console, test_devices, test_species, test_training
+        from . import test_anchor_training, test_configuration, test_console, test_devices, test_schedulers, test_species, test_training
         import unittest
         suite = unittest.defaultTestLoader.loadTestsFromModule(test_training)
         suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_configuration))
@@ -32,6 +32,7 @@ def run(args, parser=None):
         suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_species))
         suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_anchor_training))
         suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_console))
+        suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(test_schedulers))
         stream = sys.stderr if is_verbose() else io.StringIO()
         with library_output():
             result = unittest.TextTestRunner(stream=stream, verbosity=2 if is_verbose() else 1).run(suite)

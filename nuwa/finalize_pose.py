@@ -224,6 +224,7 @@ def run(args, parser=None):
                 for batch in loader:
                     predictions.append(model(return_loss=False, **move_batch(batch, device)))
                     progress.update()
+            print(file=progress.file, flush=True)
             mmcv.dump(predictions, str(results_dir / "predictions.pkl"))
             with library_output():
                 metrics = dataset.evaluate(predictions, res_folder=str(results_dir), metric="mAP")

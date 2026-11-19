@@ -114,8 +114,8 @@ project-root/
   nuwa/
   vitpose/                       # bundled code and model configs
   checkpoints/
-    split/
-      ap10k.pth                  # pretrained AP-10K ViTPose-S weights
+    split_base/
+      ap10k.pth                  # pretrained AP-10K ViTPose-B weights
   data/
     ap-10k/
       annotations/
@@ -138,20 +138,20 @@ For another dataset location, pass `--data-root path/to/ap-10k` to both
 
 ### Checkpoint
 
-Use the supplied `checkpoints/split/ap10k.pth` with the
-[default ViTPose-S AP-10K config](vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py).
-The model has 384 embedding dimensions, 12 transformer blocks, 12 attention
+Use `checkpoints/split_base/ap10k.pth` with the
+[default ViTPose-B AP-10K config](vitpose/configs/animal/2d_kpt_sview_rgb_img/topdown_heatmap/ap10k/ViTPose_base_ap10k_256x192.py).
+The model has 768 embedding dimensions, 12 transformer blocks, 12 attention
 heads and 17 keypoint channels. Other checkpoints need a matching `--config`.
 
 If you have the supplied multi-task source checkpoint instead, place it at
-`checkpoints/vitpose-plus-small.pth` and split it:
+`checkpoints/vitpose-plus-base.pth` and export its AP-10K task:
 
 ```console
-python vitpose/tools/model_split.py
+python vitpose/tools/model_split.py --source checkpoints/vitpose-plus-base.pth --target checkpoints/split_base --tasks ap10k
 ```
 
-This writes the task checkpoints, including `ap10k.pth`, into
-`checkpoints/split/`. The splitter also accepts `--source` and `--target`.
+This writes `ap10k.pth` into `checkpoints/split_base/`. The `--tasks` option
+selects which task checkpoints to export; omitting it exports all tasks.
 
 Relative file paths are resolved from the project root. Absolute paths work
 too. Generated models, logs, configs and reports go under `outputs/` by default;
@@ -176,7 +176,7 @@ copied. Use `python main.py prepare --list` to see other species.
 ## 5. Run a smoke test
 
 ```console
-python main.py derive --species dog --pruning-rate 0.4 --smoke-test --out-dir outputs/dog_smoke
+python main.py derive --species dog --pruning-rate 0.1 --smoke-test --out-dir outputs/dog_smoke
 ```
 
 This performs ten mask updates, prunes using two training crops, verifies model

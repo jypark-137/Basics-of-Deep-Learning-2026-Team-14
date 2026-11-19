@@ -9,8 +9,8 @@ PROJECT_ROOT = PACKAGE_ROOT.parent
 VITPOSE_ROOT = PROJECT_ROOT / "vitpose"
 DEFAULT_SPECIES = "dog"
 DEFAULT_CONFIG = str(VITPOSE_ROOT / "configs/animal/2d_kpt_sview_rgb_img/"
-                     "topdown_heatmap/ap10k/ViTPose_small_ap10k_256x192.py")
-DEFAULT_CHECKPOINT = str(PROJECT_ROOT / "checkpoints/split/ap10k.pth")
+                     "topdown_heatmap/ap10k/ViTPose_base_ap10k_256x192.py")
+DEFAULT_CHECKPOINT = str(PROJECT_ROOT / "checkpoints/split_base/ap10k.pth")
 DEFAULT_DATA_ROOT = str(PROJECT_ROOT / "data/ap-10k")
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "outputs"
 

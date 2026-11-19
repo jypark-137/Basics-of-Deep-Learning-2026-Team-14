@@ -24,6 +24,9 @@ from ..species import add_species_argument, normalize_species, species_slug
 from device_utils import add_device_argument, resolve_device
 from ..dataset.utils import make_loaders, move_batch, validate_subsets
 from ..engine.eval import evaluate_ap
+from ..engine.scheduler import (
+    SCHEDULER_DEFAULTS, add_scheduler_arguments, make_scheduler, scheduler_settings,
+)
 from ..utils.io import atomic_torch_save, file_sha256, frozen_state_sha256
 from .skp import MaskLinear, TopKBinarizer, get_skp_parameters
 from ..utils.console import CommandParser, command_output, detail, display_path
@@ -168,6 +171,7 @@ def _options(args, train_loader=None):
         "device": "auto", "mask_lr": 1e-3, "beta_lr": 1e-1,
         "weight_decay": 5e-2, "eval_every": 1000, "log_every": 10,
         "seed": 42, "smoke_test": False, "masks": None, "uniform": False,
+        **SCHEDULER_DEFAULTS,
     }
     for name, value in defaults.items():
         if not hasattr(args, name):
@@ -180,6 +184,7 @@ def _options(args, train_loader=None):
                 (args.mask_lr, args.beta_lr, args.weight_decay))
             or min(args.mask_lr, args.beta_lr) <= 0 or args.weight_decay < 0):
         raise ValueError("Learning rates must be positive and weight decay nonnegative")
+    scheduler_settings(args, args.steps)
     args.device = str(resolve_device(args.device))
     args.species = normalize_species(args.species or DEFAULT_SPECIES)
     args.data_root = str(resolve_data_root(args.data_root))
@@ -212,8 +217,9 @@ def _check_completed_training_settings(args, masks):
     saved = masks.get("training_settings", {})
     names = ("species", "split", "config", "data_root", "steps", "batch_size",
              "mask_lr", "beta_lr", "weight_decay", "eval_every", "seed",
-             "smoke_test", "uniform")
-    changed = [name for name in names if saved.get(name) != getattr(args, name)]
+             "smoke_test", "uniform", *SCHEDULER_DEFAULTS)
+    changed = [name for name in names
+               if saved.get(name, SCHEDULER_DEFAULTS.get(name)) != getattr(args, name)]
     if changed:
         raise ValueError("Existing anchor training settings differ ({}); choose another --out-dir "
                          "or select the saved masks explicitly with --masks".format(
@@ -271,6 +277,8 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
                      "train_annotations": str(getattr(train_loader.dataset, "ann_file", "")),
                      "val_annotations": str(getattr(getattr(val_loader, "dataset", None),
                                                     "ann_file", ""))})
+    schedule = scheduler_settings(args, args.steps)
+    settings["lr_schedule"] = schedule
     with (output_dir / "run_config.json").open("w", encoding="utf-8") as handle:
         json.dump(settings, handle, indent=2)
         handle.write("\n")
@@ -289,6 +297,7 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
         {"params": masks, "lr": args.mask_lr, "weight_decay": args.weight_decay},
         {"params": betas, "lr": args.beta_lr, "weight_decay": args.weight_decay},
     ], betas=(0.9, 0.999), eps=1e-8, amsgrad=False)
+    scheduler = make_scheduler(optimizer, schedule)
     metadata = {"species": args.species, "category_id": category_id,
                 "category_ids": getattr(args, "category_ids", None), "split": args.split,
                 "base_checkpoint": str(checkpoint_path), "base_checkpoint_sha256": file_sha256(checkpoint_path),
@@ -317,7 +326,9 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
             handle.write(json.dumps(event) + "\n")
 
     record({"event": "initial", "baseline_val_ap": baseline_ap, "masked_val_ap": best_ap,
-            "kept_neurons": initial_info["kept_neurons"]})
+            "kept_neurons": initial_info["kept_neurons"], "lr_schedule": schedule,
+            "mask_lr": optimizer.param_groups[0]["lr"],
+            "beta_lr": optimizer.param_groups[1]["lr"]})
     try:
         while step < args.steps:
             try:
@@ -334,7 +345,10 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
             loss.backward()
             # Stop on the first bad gradient, before it can corrupt saved masks.
             check_mask_gradients(model)
+            mask_lr, beta_lr = [group["lr"] for group in optimizer.param_groups]
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
             step += 1
             if any(not torch.isfinite(parameter).all().item() for parameter in masks + betas):
                 raise RuntimeError("Nonfinite mask/beta after update {}".format(step))
@@ -343,11 +357,14 @@ def train_mask(args, model, train_loader, test_loader, uniform=False):
                 info = export_masks(model)
                 kept, total = remaining_neurons(info)
                 loss_value = float(loss.detach().item())
-                print("Step {}/{} | loss {:.6f} | MLP neurons masked {:.2f}% | {:.1f}s/update".format(
+                print("Step {}/{} | loss {:.6f} | MLP neurons masked {:.2f}% | "
+                      "mask LR {:.2e} | beta LR {:.2e} | {:.1f}s/update".format(
                     step, args.steps, loss_value, 100 * (1 - kept / total),
+                    mask_lr, beta_lr,
                     (time.perf_counter() - start) / step), flush=True)
                 record({"event": "train", "step": step, "loss": loss_value,
-                        "kept_neurons": info["kept_neurons"]})
+                        "kept_neurons": info["kept_neurons"],
+                        "mask_lr": mask_lr, "beta_lr": beta_lr})
 
             if val_loader is not None and (step % args.eval_every == 0 or step == args.steps):
                 last_ap = evaluate_ap(model, val_loader, device,
@@ -588,6 +605,7 @@ def get_args_parser():
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--mask-lr", type=float, default=1e-3)
     parser.add_argument("--beta-lr", type=float, default=1e-1)
+    add_scheduler_arguments(parser)
     parser.add_argument("--weight-decay", type=float, default=5e-2)
     parser.add_argument("--eval-every", type=int, default=1000)
     parser.add_argument("--log-every", type=int, default=10)
